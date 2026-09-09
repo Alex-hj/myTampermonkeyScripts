@@ -23,7 +23,7 @@
 // 块级作用域隔离脚本；安装时不需要构建，也不依赖外部资源。
 {
     const CONFIG = Object.freeze({
-        edgeWidth: 18,
+        edgeWidth: 60,
         openDelay: 100,
         closeDelay: 250,
         sidebarPadding: 0,
@@ -1089,15 +1089,27 @@
         state.mode = mode;
         if (mode === 'off') cancelJump();
         if (typeof GM_setValue === 'function') GM_setValue('navigationMode', mode);
+        registerModeMenus();
         maintainHistory();
         refreshNavigation();
     }
 
+    function registerModeMenus() {
+        if (typeof GM_registerMenuCommand !== 'function') return;
+        const modes = [
+            { id: 'cghs-mode-auto', key: 'auto', label: '自动（优先原生）' },
+            { id: 'cghs-mode-always', key: 'always', label: '强制显示备用' },
+            { id: 'cghs-mode-off', key: 'off', label: '关闭备用' },
+        ];
+        for (const { id, key, label } of modes) {
+            const indicator = state.mode === key ? '✅' : '○';
+            GM_registerMenuCommand(`${indicator} 右侧导航：${label}`, () => setMode(key), { id });
+        }
+    }
+
     function registerMenus() {
         if (typeof GM_registerMenuCommand !== 'function') return;
-        GM_registerMenuCommand('右侧导航：自动（优先原生）', () => setMode('auto'));
-        GM_registerMenuCommand('右侧导航：强制显示备用', () => setMode('always'));
-        GM_registerMenuCommand('右侧导航：关闭备用', () => setMode('off'));
+        registerModeMenus();
         GM_registerMenuCommand('重新读取完整会话索引', () => {
             syncConversation();
             if (state.conversation.status !== 'loading') state.conversation.retryAt = 0;

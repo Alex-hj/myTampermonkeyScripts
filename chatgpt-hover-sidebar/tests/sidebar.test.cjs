@@ -72,7 +72,7 @@ function fixture(t, options = {}) {
     const storage = new Map([['navigationMode', options.mode || 'auto']]);
     window.GM_getValue = (key, fallback) => storage.get(key) || fallback;
     window.GM_setValue = (key, value) => storage.set(key, value);
-    window.GM_registerMenuCommand = (label, action) => menus.set(label, action);
+    window.GM_registerMenuCommand = (label, action, options) => menus.set(options?.id || label, action);
     installGeometry(window);
     const advance = fakeClock(window);
     return { window, document: window.document, advance, menus, storage,
@@ -235,13 +235,13 @@ test('保留原生导航，自动隐藏备用；强制模式可启用并保存',
     const original = native.outerHTML;
     f.start();
     assert.equal(f.document.getElementById('cghs-navigation'), null);
-    f.menus.get('右侧导航：强制显示备用')();
+    f.menus.get('cghs-mode-always')();
     const host = f.document.getElementById('cghs-navigation');
     assert.equal(host.hidden, false);
     assert.equal(host.shadowRoot.querySelectorAll('button').length, 2);
     assert.equal(native.outerHTML, original);
     assert.equal(f.storage.get('navigationMode'), 'always');
-    f.menus.get('右侧导航：关闭备用')();
+    f.menus.get('cghs-mode-off')();
     assert.equal(host.hidden, true);
 });
 
@@ -788,7 +788,7 @@ test('页面完整分页响应可直接建立索引', async t => {
     f.start();
     await f.window.fetch('/backend-api/conversations/test');
     await settlePromises();
-    f.menus.get('右侧导航：强制显示备用')();
+    f.menus.get('cghs-mode-always')();
     await f.advance(1500);
     assert.match(navRoot(f).querySelector('.status').textContent, /全部 1/);
 });
@@ -807,7 +807,7 @@ test('页面不完整第一页作为分页起点，补齐历史且不重复请�
     f.start();
     await f.window.fetch('/backend-api/conversations/test');
     await settlePromises();
-    f.menus.get('右侧导航：强制显示备用')();
+    f.menus.get('cghs-mode-always')();
     await f.advance(1500);
     assert.equal(firstRequests, 1);
     assert.match(navRoot(f).querySelector('.status').textContent, /全部 2/);

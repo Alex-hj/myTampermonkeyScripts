@@ -104,9 +104,9 @@ function addSidebar(f, options = {}) {
     return { panel, open, close, setOpen, clicks: () => closeClicks };
 }
 
-function pointer(f, x, type = 'mouse') {
+function pointer(f, x, type = 'mouse', y = 300) {
     const event = new f.window.Event('pointermove', { bubbles: true });
-    Object.assign(event, { clientX: x, clientY: 300, pointerType: type });
+    Object.assign(event, { clientX: x, clientY: y, pointerType: type });
     f.document.dispatchEvent(event);
 }
 
@@ -171,7 +171,7 @@ test('边缘停留展开，离开收起，快速划过不展开', async t => {
     assert.equal(bar.panel.hidden, true);
 });
 
-test('手动打开的侧栏不被悬停逻辑关闭', async t => {
+test('手动打开的侧栏在鼠标移出后关闭', async t => {
     const f = fixture(t);
     const bar = addSidebar(f);
     f.start();
@@ -179,10 +179,10 @@ test('手动打开的侧栏不被悬停逻辑关闭', async t => {
     bar.open.click();
     pointer(f, 800);
     await f.advance(2500);
-    assert.equal(bar.panel.hidden, false);
+    assert.equal(bar.panel.hidden, true);
 });
 
-test('菜单打开时暂停自动关闭，菜单移除后恢复', async t => {
+test('菜单打开也不会阻止鼠标移出后自动关闭', async t => {
     const f = fixture(t);
     const bar = addSidebar(f, { open: false });
     f.start();
@@ -194,7 +194,7 @@ test('菜单打开时暂停自动关闭，菜单移除后恢复', async t => {
     f.document.body.append(menu);
     pointer(f, 800);
     await f.advance(2000);
-    assert.equal(bar.panel.hidden, false);
+    assert.equal(bar.panel.hidden, true);
     menu.remove();
     await f.advance(1800);
     assert.equal(bar.panel.hidden, true);
@@ -573,7 +573,7 @@ test('诊断窗口一键复制阶段错误和侧栏状态，关闭后移除窗�
     assert.equal(host.isConnected, false);
 });
 
-test('启动完成后页面自行展开会再次收起，手动打开保持展开', async t => {
+test('页面自行展开和手动打开都执行移出收起', async t => {
     const f = fixture(t);
     const bar = addSidebar(f, { open: false });
     f.start();
@@ -583,7 +583,40 @@ test('启动完成后页面自行展开会再次收起，手动打开保持展�
     assert.equal(bar.panel.hidden, true);
     bar.open.click();
     await f.advance(2500);
+    assert.equal(bar.panel.hidden, true);
+});
+
+test('手动打开后鼠标在侧栏内保持，移出后焦点不阻止关闭', async t => {
+    const f = fixture(t);
+    const bar = addSidebar(f);
+    f.start();
+    await f.advance(1500);
+    pointer(f, 100);
+    bar.open.click();
+    bar.close.focus();
+    await f.advance(1500);
     assert.equal(bar.panel.hidden, false);
+    pointer(f, 281);
+    await f.advance(400);
+    assert.equal(bar.panel.hidden, true);
+});
+
+test('收起延时内返回侧栏取消关闭，再离开底部时收起', async t => {
+    const f = fixture(t);
+    const bar = addSidebar(f);
+    f.start();
+    await f.advance(1500);
+    pointer(f, 100);
+    bar.open.click();
+    await f.advance(800);
+    pointer(f, 600);
+    await f.advance(100);
+    pointer(f, 100);
+    await f.advance(500);
+    assert.equal(bar.panel.hidden, false);
+    pointer(f, 100, 'mouse', 701);
+    await f.advance(400);
+    assert.equal(bar.panel.hidden, true);
 });
 
 test('主动历史读取携带当前设备信息，认证接口不携带设备头', async t => {

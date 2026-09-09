@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT 左侧悬停展开 + 原生导航保护
 // @namespace    local.chatgpt-hover-sidebar
-// @version      1.1.2
+// @version      1.1.3
 // @homepageURL  https://github.com/Alex-hj/myTampermonkeyScripts
 // @updateURL    https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
@@ -25,8 +25,8 @@
     const CONFIG = Object.freeze({
         edgeWidth: 18,
         openDelay: 100,
-        closeDelay: 400,
-        sidebarPadding: 16,
+        closeDelay: 250,
+        sidebarPadding: 0,
         animationDelay: 650,
         minimumWidth: 768,
         nativeNavigationSelector: '', // DOM 更新后可填入已确认的原生导航选择器。
@@ -50,7 +50,7 @@
         mode: readMode(), nativeSeenAt: 0, activeFrame: 0,
         conversation: null, jump: null, notice: '',
         closedSince: null,
-        manualSidebar: false, scriptClick: false, requestContext: null,
+        scriptClick: false, requestContext: null,
         fetch: null, captureInstalled: false,
     };
 
@@ -426,9 +426,7 @@
             return;
         }
         if (state.owned && current === 'closed' && !state.pending) state.owned = false;
-        if (current === 'closed' && !state.pending) state.manualSidebar = false;
-        if (current === 'open' && !state.owned && !state.manualSidebar) clickToggle('close');
-        if (state.owned) evaluatePointer();
+        evaluatePointer();
     }
 
     function handleSidebarClick(event) {
@@ -436,11 +434,9 @@
         const button = event.target.closest?.('button, [role="button"]');
         if (!button) return;
         if (button === toggleButton('open')) {
-            state.manualSidebar = true;
             state.owned = false;
             state.startup = false;
         } else if (button === toggleButton('close')) {
-            state.manualSidebar = false;
             state.owned = false;
         }
     }
@@ -467,26 +463,29 @@
 
     function closeFromHover() {
         state.closeTimer = null;
-        if (!state.owned || interactionProtected() || pointerInside()) return;
+        // 所有打开来源统一执行移出收起，焦点和菜单不再阻止关闭。
+        if (!desktop() || pointerInside() || sidebarState() !== 'open') return;
         clickToggle('close');
     }
 
     function pointerInside() {
         if (!state.pointer) return false;
         const panel = sidebar();
-        const right = panel?.getBoundingClientRect().right || 320;
-        return state.pointer.x <= right + CONFIG.sidebarPadding;
+        const rect = panel?.getBoundingClientRect()
+            || { left: 0, right: 320, top: 0, bottom: innerHeight };
+        return state.pointer.x >= rect.left && state.pointer.x <= rect.right + CONFIG.sidebarPadding
+            && state.pointer.y >= rect.top && state.pointer.y <= rect.bottom;
     }
 
     function evaluatePointer() {
         if (!desktop()) return;
+        const current = sidebarState();
         const atEdge = state.pointer && state.pointer.x <= CONFIG.edgeWidth;
-        if (atEdge && !state.owned && !state.startup && !state.openTimer) {
+        if (atEdge && current === 'closed' && !state.startup && !state.openTimer) {
             state.openTimer = setTimeout(openFromEdge, CONFIG.openDelay);
         }
         if (!atEdge) cancelTimer('openTimer');
-        if (!state.owned) return;
-        if (pointerInside() || interactionProtected()) {
+        if (current !== 'open' || pointerInside()) {
             cancelTimer('closeTimer');
             return;
         }
@@ -746,11 +745,11 @@
                 const label = element.getAttribute('aria-label') || element.getAttribute('data-testid') || element.title;
                 return `${label} [${isVisible(element) ? '可见' : '隐藏'}]`;
             });
-        return `脚本版本：1.1.2\n启动自动收起：默认启用\n`
+        return `脚本版本：1.1.3\n启动自动收起：默认启用\n`
             + `桌面鼠标条件：${desktop() ? '满足' : '不满足（窄屏或未检测到鼠标）'}\n`
             + `左侧栏：${sidebarState()}\n启动收起：${state.startup ? '等待中' : '已完成'}\n`
             + `展开/收起按钮：${!!toggleButton('open')} / ${!!toggleButton('close')}\n`
-            + `展开来源：${state.manualSidebar ? '手动' : state.owned ? '脚本悬停' : '页面/未知'}\n`
+            + `收起规则：鼠标移出后统一收起（包括手动打开）\n`
             + `页面请求观察：${state.captureInstalled ? '已启用' : '不可用'}\n`
             + `设备信息：${!!(deviceCookie() || state.requestContext?.headers['oai-device-id'])}\n`
             + `当前会话工作区信息：${state.requestContext?.id === context?.id && !!state.requestContext?.headers['chatgpt-account-id']}\n`
@@ -929,7 +928,6 @@
         });
         GM_registerMenuCommand('立即收起左侧栏', () => {
             state.startup = true;
-            state.manualSidebar = false;
             state.closedSince = null;
             maintainSidebar();
         });

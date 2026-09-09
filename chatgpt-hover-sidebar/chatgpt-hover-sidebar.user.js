@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT 左侧悬停展开 + 原生导航保护
 // @namespace    local.chatgpt-hover-sidebar
-// @version      1.2.1
+// @version      1.2.2
 // @homepageURL  https://github.com/Alex-hj/myTampermonkeyScripts
 // @updateURL    https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
@@ -33,6 +33,7 @@
         requestTimeout: 15000,
         maxHistoryPages: 200,
         jumpTimeout: 45000,
+        jumpTopInset: 72,
         startupStableDelay: 1000,
     });
     const PREFIX = 'cghs-navigation';
@@ -54,6 +55,7 @@
         fetch: null, captureInstalled: false,
         capturedResponses: 0, captureSummary: '尚未观察到当前会话响应',
         navigationCloseTimer: null, navigationExpanded: false, navigationHovered: false,
+        lastJump: null,
     };
 
     function requestConversation(url) {
@@ -574,19 +576,40 @@
         const nodes = rawMessages();
         if (context) context.observed = new Map(nodes.map(node => [node, messageFingerprint(node)]));
         return nodes.filter(node => context?.stale.get(node) !== messageFingerprint(node)).map(element => {
-            const target = element.closest('[data-testid^="conversation-turn-"], article') || element;
+            const target = messageTarget(element);
             const text = normalizeText(element.innerText || element.textContent);
-            const id = element.getAttribute('data-message-id')
-                || element.closest('[data-message-id]')?.getAttribute('data-message-id') || '';
-            return { id, target, text: text || '图片 / 附件消息' };
+            const ids = messageIds(element, target);
+            return { id: ids[0] || '', ids, target, text: text || '图片 / 附件消息' };
         });
+    }
+
+    function messageTarget(element) {
+        const turn = element.closest('[data-testid^="conversation-turn-"], [data-turn-id-container]');
+        if (turn) return turn;
+        const article = element.closest('article');
+        return article?.querySelectorAll('[data-message-author-role="user"]').length === 1 ? article : element;
+    }
+
+    function messageIds(element, target) {
+        const nodes = [element, element.closest('[data-message-id]'),
+            ...element.querySelectorAll('[data-message-id]'), target];
+        const ids = nodes.filter(Boolean).map(node => node.getAttribute('data-message-id')).filter(Boolean);
+        for (const node of [element, target]) {
+            for (const name of ['data-turn-id', 'data-turn-id-container']) {
+                const value = node.getAttribute(name);
+                if (value) ids.push(value);
+            }
+        }
+        return [...new Set(ids)];
     }
 
     function collectEntries() {
         const loaded = loadedEntries();
         const context = state.conversation;
         if (!context?.entries.length) return loaded;
-        const byId = new Map(loaded.filter(entry => entry.id).map(entry => [entry.id, entry]));
+        const byId = new Map();
+        loaded.forEach(entry => entry.ids.forEach(id => byId.set(id, entry)));
+        const matched = new Set();
         const counts = new Map();
         const byText = new Map();
         context.entries.forEach(entry => counts.set(entry.text, (counts.get(entry.text) || 0) + 1));
@@ -598,10 +621,11 @@
             let match = byId.get(entry.id);
             // 缺少 ID 时只允许唯一全文匹配，避免重复提问跳到错误位置。
             if (!match && counts.get(entry.text) === 1) match = byText.get(entry.text);
+            if (match) matched.add(match);
             return { ...entry, target: match?.target || null };
         });
         const known = new Set(entries.map(entry => entry.id));
-        const extra = loaded.filter(entry => entry.id && !known.has(entry.id));
+        const extra = loaded.filter(entry => entry.id && !known.has(entry.id) && !matched.has(entry));
         const signature = extra.map(entry => entry.id).join(',');
         if (signature && signature !== context.unknown && context.status !== 'loading') {
             context.unknown = signature;
@@ -718,20 +742,25 @@
     }
 
     function scrollToMessage(target) {
-        const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-        target.scrollIntoView({ behavior: reduced ? 'instant' : 'smooth', block: 'start' });
+        const root = conversationScroller(target);
+        if (root.clientHeight > 0 && root.scrollHeight > root.clientHeight) {
+            const offset = target.getBoundingClientRect().top - scrollBounds(root).top - CONFIG.jumpTopInset;
+            const top = Math.max(0, Math.min(root.scrollHeight - root.clientHeight, root.scrollTop + offset));
+            root.scrollTo({ top, behavior: 'instant' });
+        } else target.scrollIntoView({ behavior: 'instant', block: 'start' });
     }
 
     function cancelJump() {
         if (!state.jump) return;
         state.jump.cancelled = true;
+        state.jump.result = '已取消';
         state.jump = null;
         state.notice = '';
     }
 
-    function conversationScroller() {
-        const message = rawMessages()[0];
-        let node = message || document.querySelector('main');
+    function conversationScroller(target) {
+        const message = target || rawMessages()[0];
+        let node = message?.parentElement || document.querySelector('main');
         while (node && node !== document.body) {
             if (node.scrollHeight > node.clientHeight + 20
                 && /auto|scroll/.test(getComputedStyle(node).overflowY)) return node;
@@ -741,6 +770,25 @@
         const explicit = [...document.querySelectorAll('[data-scroll-root]')]
             .find(root => main && (root.contains(main) || main.contains(root)));
         return explicit || document.scrollingElement || document.documentElement;
+    }
+
+    function scrollBounds(root) {
+        const documentRoot = root === document.scrollingElement || root === document.documentElement;
+        const top = documentRoot ? 0 : root.getBoundingClientRect().top;
+        return { top, bottom: top + (root.clientHeight || innerHeight) };
+    }
+
+    function targetIsAligned(target) {
+        const root = conversationScroller(target);
+        const rect = target.getBoundingClientRect();
+        const bounds = scrollBounds(root);
+        if (rect.width === 0 || rect.height === 0 || rect.top >= bounds.bottom - 24 || rect.bottom <= bounds.top) return false;
+        if (Math.abs(rect.top - bounds.top - CONFIG.jumpTopInset) <= 12) return true;
+        // 首尾受到滚动边界限制时，只要问题开头确实出现在正文可见区域即可。
+        if (root.scrollTop <= 1) return rect.top >= bounds.top && rect.top <= bounds.top + CONFIG.jumpTopInset + 12;
+        const atEnd = root.scrollHeight > root.clientHeight
+            && root.scrollTop >= root.scrollHeight - root.clientHeight - 1;
+        return atEnd && rect.top >= bounds.top && rect.top < bounds.bottom - 24;
     }
 
     function jumpStillActive(job) {
@@ -755,41 +803,67 @@
             .filter(index => index >= 0);
         const height = root.clientHeight || innerHeight;
         const max = Math.max(0, root.scrollHeight - height);
-        if (!job.estimated && max > height * 3 && wanted >= 0) {
-            job.estimated = true;
-            root.scrollTo({ top: max * wanted / Math.max(1, entries.length - 1), behavior: 'instant' });
-            return;
-        }
-        let direction = -1;
+        let direction = job.direction || -1;
+        if (mounted.length && wanted < mounted[0]) direction = -1;
         if (mounted.length && wanted > mounted[mounted.length - 1]) direction = 1;
         if (mounted.length && wanted >= mounted[0] && wanted <= mounted[mounted.length - 1]) {
             const nearest = mounted.reduce((a, b) => Math.abs(a - wanted) < Math.abs(b - wanted) ? a : b);
             direction = wanted < nearest ? -1 : 1;
         }
-        const top = Math.max(0, Math.min(max, root.scrollTop + direction * height * 0.75));
+        if (job.direction && job.direction !== direction) job.stepRatio = Math.max(0.15, job.stepRatio / 2);
+        job.direction = direction;
+        const top = Math.max(0, Math.min(max, root.scrollTop + direction * height * job.stepRatio));
         // 小步重叠滚动，给虚拟列表留下挂载目标消息的机会；边界轻推触发历史加载。
-        root.scrollTo({ top: top === root.scrollTop && max > 0 ? Math.max(0, top - direction * 2) : top,
+        root.scrollTo({ top: top === root.scrollTop && max > 0 ? Math.max(0, Math.min(max, top - direction * 24)) : top,
             behavior: 'instant' });
+    }
+
+    function resolveJumpEntry(job, entries) {
+        if (job.id) return entries.find(entry => entry.id === job.id);
+        const candidates = entries.filter(entry => entry.text === job.text);
+        return candidates.length === 1 ? candidates[0] : candidates.find(entry => entry.target === job.originalTarget);
+    }
+
+    function confirmJumpTarget(job, target) {
+        const top = target.getBoundingClientRect().top;
+        const stable = job.lastTarget === target && Math.abs(top - job.lastTop) <= 4 && targetIsAligned(target);
+        job.stableFrames = stable ? job.stableFrames + 1 : 0;
+        job.lastTarget = target;
+        job.lastTop = top;
+        if (job.stableFrames >= 2) return true;
+        scrollToMessage(target);
+        return false;
     }
 
     async function locateUnloaded(job) {
         const deadline = Date.now() + CONFIG.jumpTimeout;
         while (jumpStillActive(job) && Date.now() < deadline) {
+            job.attempts++;
             const entries = collectEntries();
-            if (!entries.some(entry => entry.id === job.id)) {
+            const entry = resolveJumpEntry(job, entries);
+            if (!entry) {
                 state.notice = '会话分支已变化，请重新选择问题';
+                job.result = '目标已变化';
                 return;
             }
-            const target = entries.find(entry => entry.id === job.id)?.target;
+            const target = entry.target;
             if (target?.isConnected) {
-                scrollToMessage(target);
-                state.notice = '';
-                return;
+                if (confirmJumpTarget(job, target)) {
+                    state.notice = '';
+                    job.result = '已确认定位';
+                    return;
+                }
+            } else {
+                job.stableFrames = 0;
+                job.lastTarget = null;
+                stepTowardsEntry(job, entries);
             }
-            stepTowardsEntry(job, entries);
-            await new Promise(resolve => setTimeout(resolve, 250));
+            await new Promise(resolve => setTimeout(resolve, 400));
         }
-        if (jumpStillActive(job)) state.notice = '尚未定位到此问题，请重试或手动加载历史';
+        if (jumpStillActive(job)) {
+            state.notice = '尚未定位到此问题，请重试或手动加载历史';
+            job.result = '超时，未确认定位';
+        }
     }
 
     async function jumpToEntry(index) {
@@ -797,18 +871,24 @@
         const entry = state.entries[index];
         if (!entry) return;
         cancelJump();
-        if (entry.target?.isConnected) {
-            scrollToMessage(entry.target);
-            return;
-        }
-        const job = { id: entry.id, context: state.conversation, cancelled: false };
+        // 使用点击时的消息身份重新查找节点，不能信任上一次渲染保留的 DOM 引用。
+        const job = { id: entry.id, text: entry.text, originalTarget: entry.target,
+            context: state.conversation, cancelled: false, attempts: 0, stableFrames: 0,
+            stepRatio: 0.75, result: '定位中' };
         state.jump = job;
+        state.lastJump = job;
         state.notice = '正在定位历史问题…（Esc 取消）';
         updateNavigationStatus();
         try { await locateUnloaded(job); }
-        catch { if (jumpStillActive(job)) state.notice = '页面暂不支持定位，请手动加载历史'; }
+        catch {
+            if (jumpStillActive(job)) {
+                state.notice = '页面暂不支持定位，请手动加载历史';
+                job.result = '定位异常';
+            }
+        }
         finally {
             if (state.jump === job) state.jump = null;
+            if (state.lastJump === job) state.lastJump = { result: job.result, attempts: job.attempts };
             updateNavigationStatus();
         }
     }
@@ -834,7 +914,7 @@
                 const label = element.getAttribute('aria-label') || element.getAttribute('data-testid') || element.title;
                 return `${label} [${isVisible(element) ? '可见' : '隐藏'}]`;
             });
-        return `脚本版本：1.2.1\n启动自动收起：默认启用\n`
+        return `脚本版本：1.2.2\n启动自动收起：默认启用\n`
             + `桌面鼠标条件：${desktop() ? '满足' : '不满足（窄屏或未检测到鼠标）'}\n`
             + `左侧栏：${sidebarState()}\n启动收起：${state.startup ? '等待中' : '已完成'}\n`
             + `展开/收起按钮：${!!toggleButton('open')} / ${!!toggleButton('close')}\n`
@@ -844,6 +924,7 @@
             + `设备信息：${!!(deviceCookie() || state.requestContext?.headers['oai-device-id'])}\n`
             + `当前会话工作区信息：${state.requestContext?.id === context?.id && !!state.requestContext?.headers['chatgpt-account-id']}\n`
             + `索引来源：${context?.source || '暂无'}\n`
+            + `最近定位：${state.lastJump?.result || '尚未点击'}，检查 ${state.lastJump?.attempts || 0} 次\n`
             + `备用导航：${state.mode}\n完整索引：${context?.status}\n`
             + `${context?.error || ''}\n${(context?.attempts || []).join('\n')}\n`
             + `侧栏按钮：\n${buttons.join('\n') || '未找到语义标签'}`;

@@ -422,13 +422,16 @@ test('点击未加载问题触发滚动加载，并以消息 ID 确认定位', a
     mockApi(f, () => tree([apiMessage('u1', '重复问题'), apiMessage('u2', '重复问题')]));
     const latest = mountedMessage(f, 'u2', '重复问题');
     let oldest;
-    virtualScroller(f, () => { oldest = mountedMessage(f, 'u1', '重复问题'); });
+    const scroller = virtualScroller(f, () => {
+        if (!oldest) oldest = mountedMessage(f, 'u1', '重复问题');
+    });
     f.start();
     await f.advance(1500);
     navRoot(f).querySelector('button').click();
     await f.advance(600);
     assert.equal(latest.scrollOptions, undefined);
-    assert.equal(oldest.scrollOptions.block, 'start');
+    assert.ok(oldest.isConnected);
+    assert.ok(scroller.scrollTop < 5400);
 });
 
 test('手动滚轮取消尚未完成的定位', async t => {
@@ -635,6 +638,86 @@ function responseData(data) {
     return { ok: true, json: async () => data, clone: () => ({ json: async () => data }) };
 }
 
+function geometricScroller(f, article) {
+    const main = f.document.querySelector('main');
+    main.style.overflowY = 'auto';
+    Object.defineProperty(main, 'clientHeight', { value: 600 });
+    Object.defineProperty(main, 'scrollHeight', { value: 6000 });
+    main.scrollTop = 0;
+    main.messageOffset = 3000;
+    main.scrollCalls = [];
+    main.getBoundingClientRect = () => ({ top: 100, bottom: 700, width: 900, height: 600 });
+    article.getBoundingClientRect = () => {
+        const top = 100 + main.messageOffset - main.scrollTop;
+        return { top, bottom: top + 100, width: 700, height: 100 };
+    };
+    main.scrollTo = options => {
+        main.scrollCalls.push(options.top);
+        main.scrollTop = options.top;
+    };
+    return main;
+}
+
+function copiedDiagnostics(f) {
+    let value;
+    f.window.GM_setClipboard = text => { value = text; };
+    f.menus.get('查看脚本状态')();
+    const host = f.document.getElementById('cghs-navigation-diagnostics');
+    host.shadowRoot.querySelector('button').click();
+    host.remove();
+    return value;
+}
+
+test('定位只滚动正文容器，并在布局漂移后继续校正直到稳定', async t => {
+    const f = fixture(t);
+    const [article] = messages(f, ['定位测试']);
+    const main = geometricScroller(f, article);
+    f.start();
+    navRoot(f).querySelector('button').click();
+    assert.equal(article.scrollOptions, undefined);
+    assert.equal(main.scrollCalls.length, 1);
+    f.window.setTimeout(() => { main.messageOffset += 350; }, 200);
+    await f.advance(300);
+    assert.match(copiedDiagnostics(f), /最近定位：定位中/);
+    await f.advance(1800);
+    assert.equal(article.getBoundingClientRect().top, 172);
+    assert.ok(main.scrollCalls.length >= 2);
+    assert.match(copiedDiagnostics(f), /最近定位：已确认定位/);
+});
+
+test('虚拟列表复用旧节点时，点击按消息身份重新解析目标', async t => {
+    const f = fixture(t);
+    mockApi(f, () => tree([apiMessage('u1', '相同问题'), apiMessage('u2', '相同问题')]));
+    const old = mountedMessage(f, 'u1', '相同问题');
+    f.start();
+    await f.advance(1500);
+    old.firstElementChild.dataset.messageId = 'u2';
+    const next = old.cloneNode(true);
+    next.firstElementChild.dataset.messageId = 'u1';
+    f.document.querySelector('main').append(next);
+    // 在 MutationObserver 刷新导航之前点击，模拟真实页面复用 DOM 的窗口期。
+    navRoot(f).querySelector('button').click();
+    assert.equal(old.scrollOptions, undefined);
+    assert.equal(next.scrollOptions.block, 'start');
+});
+
+test('重复文本通过嵌套消息ID区分，不误定位到另一问题', async t => {
+    const f = fixture(t);
+    mockApi(f, () => tree([apiMessage('u1', '重复'), apiMessage('u2', '重复')]));
+    const articles = messages(f, ['重复', '重复']);
+    articles.forEach((article, index) => {
+        const child = f.document.createElement('span');
+        child.dataset.messageId = `u${index + 1}`;
+        article.firstElementChild.append(child);
+    });
+    f.start();
+    await f.advance(1500);
+    navRoot(f).querySelectorAll('button')[1].click();
+    assert.equal(articles[0].scrollOptions, undefined);
+    assert.equal(articles[1].scrollOptions.block, 'start');
+    assert.equal(navRoot(f).querySelectorAll('button').length, 2);
+});
+
 test('自身请求403后利用页面成功响应建立完整索引，不消耗原响应', async t => {
     const f = fixture(t);
     const data = tree([apiMessage('u1', '旧问题'), apiMessage('u2', '新问题')]);
@@ -810,4 +893,3 @@ test('加载中和新增问题同步时不显示状态文字，仅失败时显�
     assert.equal(root.querySelector('.status').hidden, false);
     assert.match(root.querySelector('.status').textContent, /失败/);
 });
-

@@ -893,3 +893,13 @@ test('加载中和新增问题同步时不显示状态文字，仅失败时显�
     assert.equal(root.querySelector('.status').hidden, false);
     assert.match(root.querySelector('.status').textContent, /失败/);
 });
+
+test('展开导航面板包含滚动条样式且缩略状态隐藏滚动条', async t => {
+    const f = fixture(t);
+    messages(f, ['测试问题']);
+    f.start();
+    const style = navRoot(f).querySelector('style').textContent;
+    assert.match(style, /scrollbar-width:\s*thin/);
+    assert.match(style, /nav\[data-expanded="true"\] \.list::-webkit-scrollbar/);
+    assert.match(style, /nav:not\(\[data-expanded="true"\]\) \.list::-webkit-scrollbar/);
+});

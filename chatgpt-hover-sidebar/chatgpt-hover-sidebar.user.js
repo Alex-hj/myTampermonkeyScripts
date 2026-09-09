@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT 左侧悬停展开 + 原生导航保护
 // @namespace    local.chatgpt-hover-sidebar
-// @version      1.2.3
+// @version      1.2.4
 // @homepageURL  https://github.com/Alex-hj/myTampermonkeyScripts
 // @updateURL    https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
@@ -644,6 +644,7 @@
                 width: 38px; z-index: 1000; color: #171717; }
             .list { width: 100%; max-height: min(60vh, 600px); overflow-y: auto;
                 scrollbar-width: none; overscroll-behavior: contain; padding: 6px 0; }
+            nav:not([data-expanded="true"]) .list::-webkit-scrollbar { display: none; width: 0; }
             button { display: flex; align-items: center; justify-content: center; width: 100%;
                 height: 12px; padding: 0; border: 0; background: transparent;
                 cursor: pointer; color: inherit; font: inherit; text-align: left; }
@@ -667,14 +668,22 @@
             nav[data-expanded="true"] { width: min(400px, calc(100vw - 32px)); }
             nav[data-expanded="true"] .list { max-height: min(70vh, 600px); padding: 7px;
                 background: #fff; border: 1px solid #d4d4d4; border-radius: 20px;
-                box-shadow: 0 6px 18px #00000014; }
+                box-shadow: 0 6px 18px #00000014;
+                scrollbar-width: thin; scrollbar-color: rgba(0, 0, 0, 0.25) transparent; }
+            nav[data-expanded="true"] .list::-webkit-scrollbar { width: 6px; display: block; }
+            nav[data-expanded="true"] .list::-webkit-scrollbar-track { background: transparent; }
+            nav[data-expanded="true"] .list::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.2); border-radius: 10px; }
+            nav[data-expanded="true"] .list::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.35); }
             nav[data-expanded="true"] button { height: 44px; padding: 0 12px;
                 justify-content: flex-start; border-radius: 12px; font-size: 16px; line-height: 1.5; }
             nav[data-expanded="true"] .tick { display: none; }
             nav[data-expanded="true"] .entry-label { display: block; }
             nav[data-expanded="true"] button[aria-current="true"] { background: #efefef; }
             nav[data-expanded="true"] button:hover { background: #f5f5f5; }
-            :host([data-dark]) nav[data-expanded="true"] .list { background: #262626; border-color: #484848; }
+            :host([data-dark]) nav[data-expanded="true"] .list { background: #262626; border-color: #484848;
+                scrollbar-color: rgba(255, 255, 255, 0.25) transparent; }
+            :host([data-dark]) nav[data-expanded="true"] .list::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); }
+            :host([data-dark]) nav[data-expanded="true"] .list::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.35); }
             :host([data-dark]) nav[data-expanded="true"] button[aria-current="true"] { background: #3c3c3c; }
             :host([data-dark]) nav[data-expanded="true"] button:hover { background: #333; }
         `;
@@ -914,7 +923,7 @@
                 const label = element.getAttribute('aria-label') || element.getAttribute('data-testid') || element.title;
                 return `${label} [${isVisible(element) ? '可见' : '隐藏'}]`;
             });
-        return `脚本版本：1.2.3\n启动自动收起：默认启用\n`
+        return `脚本版本：1.2.4\n启动自动收起：默认启用\n`
             + `桌面鼠标条件：${desktop() ? '满足' : '不满足（窄屏或未检测到鼠标）'}\n`
             + `左侧栏：${sidebarState()}\n启动收起：${state.startup ? '等待中' : '已完成'}\n`
             + `展开/收起按钮：${!!toggleButton('open')} / ${!!toggleButton('close')}\n`

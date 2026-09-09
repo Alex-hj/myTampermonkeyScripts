@@ -6,6 +6,10 @@ const { JSDOM } = require('jsdom');
 
 const source = readFileSync(join(__dirname, '..', 'chatgpt-hover-sidebar.user.js'), 'utf8');
 
+async function settlePromises() {
+    for (let i = 0; i < 30; i++) await Promise.resolve();
+}
+
 function fakeClock(window) {
     let now = 100000;
     let sequence = 0;
@@ -26,18 +30,18 @@ function fakeClock(window) {
     window.requestAnimationFrame = callback => window.setTimeout(callback, 16);
     return async function advance(duration) {
         const end = now + duration;
-        await Promise.resolve();
+        await settlePromises();
         for (let count = 0; count < 2000; count++) {
             const next = [...jobs].sort((a, b) => a[1].at - b[1].at)[0];
             if (!next || next[1].at > end) break;
             now = next[1].at;
             jobs.delete(next[0]);
             next[1].callback();
-            await Promise.resolve();
+            await settlePromises();
             if (count === 1999) throw new Error('Timer loop');
         }
         now = end;
-        await Promise.resolve();
+        await settlePromises();
     };
 }
 
@@ -60,6 +64,7 @@ function fixture(t, options = {}) {
         url: 'https://chatgpt.com/c/test', runScripts: 'outside-only', pretendToBeVisual: true,
     });
     const { window } = dom;
+    window.Headers = Headers;
     t.after(() => window.close());
     Object.defineProperty(window, 'innerWidth', { value: options.width || 1400, configurable: true });
     window.matchMedia = query => ({ matches: query.includes('hover') && options.touch !== true });
@@ -181,6 +186,7 @@ test('菜单打开时暂停自动关闭，菜单移除后恢复', async t => {
     const f = fixture(t);
     const bar = addSidebar(f, { open: false });
     f.start();
+    await f.advance(1500);
     pointer(f, 5);
     await f.advance(800);
     const menu = f.document.createElement('div');
@@ -294,5 +300,345 @@ test('重复注入不会重复注册菜单或创建导航', t => {
     f.start();
     f.start();
     assert.equal(f.document.querySelectorAll('#cghs-navigation').length, 1);
-    assert.equal(f.menus.size, 5);
+    assert.equal(f.menus.size, 6);
+});
+
+function apiMessage(id, text, role = 'user') {
+    return { id, author: { role }, content: { content_type: 'text', parts: [text] } };
+}
+
+function tree(messages) {
+    const mapping = { root: { parent: null, message: null } };
+    let parent = 'root';
+    for (const message of messages) {
+        mapping[message.id] = { parent, message };
+        parent = message.id;
+    }
+    return { mapping, current_node: parent };
+}
+
+function mockApi(f, handler) {
+    const requests = [];
+    f.window.fetch = async (url, options) => {
+        const parsed = new URL(url);
+        assert.equal(parsed.origin, 'https://chatgpt.com');
+        requests.push(parsed);
+        if (parsed.pathname === '/api/auth/session') {
+            return { ok: true, json: async () => ({ accessToken: 'test-token' }) };
+        }
+        assert.equal(options.headers.Authorization, 'Bearer test-token');
+        assert.equal(options.credentials, 'include');
+        const result = await handler(parsed, options);
+        return { ok: true, json: async () => result };
+    };
+    return requests;
+}
+
+function navRoot(f) {
+    return f.document.getElementById('cghs-navigation').shadowRoot;
+}
+
+function mountedMessage(f, id, text) {
+    const [article] = messages(f, [text]);
+    article.firstElementChild.dataset.messageId = id;
+    return article;
+}
+
+test('进入会话即索引未挂载的全部问题，只保留当前分支', async t => {
+    const f = fixture(t);
+    const data = tree([apiMessage('u1', '很早的问题'), apiMessage('a1', '回答', 'assistant'), apiMessage('u2', '最新问题')]);
+    data.mapping.other = { parent: 'u1', message: apiMessage('other', '另一分支') };
+    mockApi(f, () => data);
+    mountedMessage(f, 'u2', '最新问题');
+    f.start();
+    await f.advance(1500);
+    const labels = [...navRoot(f).querySelectorAll('button')].map(button => button.getAttribute('aria-label'));
+    assert.deepEqual(labels, ['问题 1：很早的问题', '问题 2：最新问题']);
+    assert.match(navRoot(f).querySelector('.status').textContent, /全部 2/);
+    f.document.querySelector('main').replaceChildren();
+    await f.advance(1500);
+    assert.equal(navRoot(f).querySelectorAll('button').length, 2);
+});
+
+test('不完整消息树使用分页接口，游标翻页并去重', async t => {
+    const f = fixture(t);
+    const requests = mockApi(f, url => {
+        if (url.pathname.includes('/conversation/')) return { mapping: {}, current_node: 'missing' };
+        if (url.searchParams.has('before')) return { messages: [apiMessage('u1', '早期'), apiMessage('u2', '近期')],
+            page_info: { has_previous_page: false } };
+        return { messages: [apiMessage('u2', '近期')],
+            page_info: { has_previous_page: true, start_cursor: 'opaque+/=' } };
+    });
+    f.start();
+    await f.advance(1500);
+    assert.equal(navRoot(f).querySelectorAll('button').length, 2);
+    assert.equal(requests.at(-1).searchParams.get('before'), 'opaque+/=');
+    assert.match(navRoot(f).querySelector('.status').textContent, /全部/);
+});
+
+test('分页游标循环不会把残缺历史标记为完整', async t => {
+    const f = fixture(t);
+    messages(f, ['已加载']);
+    const requests = mockApi(f, url => url.pathname.includes('/conversation/') ? {}
+        : { messages: [apiMessage('u2', '近期')], page_info: { has_previous_page: true, start_cursor: 'same' } });
+    f.start();
+    await f.advance(10000);
+    assert.match(navRoot(f).querySelector('.status').textContent, /失败/);
+    assert.equal(requests.length, 5);
+});
+
+test('切换会话丢弃旧请求响应及未被替换的旧 DOM', async t => {
+    const f = fixture(t);
+    let finishOld;
+    mockApi(f, url => url.pathname.includes('/test') ? new Promise(resolve => { finishOld = resolve; })
+        : tree([apiMessage('new', '新会话') ]));
+    mountedMessage(f, 'old', '旧会话');
+    f.start();
+    await f.advance(200);
+    f.window.history.pushState({}, '', '/c/new-chat');
+    await f.advance(1500);
+    finishOld(tree([apiMessage('old', '旧会话')]));
+    await f.advance(1500);
+    const labels = [...navRoot(f).querySelectorAll('button')].map(button => button.getAttribute('aria-label'));
+    assert.deepEqual(labels, ['问题 1：新会话']);
+});
+
+function virtualScroller(f, onScroll) {
+    const main = f.document.querySelector('main');
+    main.setAttribute('data-scroll-root', '');
+    main.style.overflowY = 'auto';
+    Object.defineProperty(main, 'clientHeight', { value: 600 });
+    Object.defineProperty(main, 'scrollHeight', { value: 6000 });
+    main.scrollTop = 5400;
+    main.scrollTo = options => {
+        main.scrollTop = options.top;
+        onScroll(options);
+    };
+    return main;
+}
+
+test('点击未加载问题触发滚动加载，并以消息 ID 确认定位', async t => {
+    const f = fixture(t);
+    mockApi(f, () => tree([apiMessage('u1', '重复问题'), apiMessage('u2', '重复问题')]));
+    const latest = mountedMessage(f, 'u2', '重复问题');
+    let oldest;
+    virtualScroller(f, () => { oldest = mountedMessage(f, 'u1', '重复问题'); });
+    f.start();
+    await f.advance(1500);
+    navRoot(f).querySelector('button').click();
+    await f.advance(600);
+    assert.equal(latest.scrollOptions, undefined);
+    assert.equal(oldest.scrollOptions.block, 'start');
+});
+
+test('手动滚轮取消尚未完成的定位', async t => {
+    const f = fixture(t);
+    mockApi(f, () => tree([apiMessage('u1', '早期'), apiMessage('u2', '近期')]));
+    mountedMessage(f, 'u2', '近期');
+    let scrolls = 0;
+    virtualScroller(f, () => { scrolls++; });
+    f.start();
+    await f.advance(1500);
+    navRoot(f).querySelector('button').click();
+    f.document.dispatchEvent(new f.window.Event('wheel'));
+    const count = scrolls;
+    await f.advance(1500);
+    assert.equal(scrolls, count);
+});
+
+test('定位超时给出提示，禁止宣称定位成功', async t => {
+    const f = fixture(t);
+    mockApi(f, () => tree([apiMessage('u1', '早期'), apiMessage('u2', '近期')]));
+    mountedMessage(f, 'u2', '近期');
+    virtualScroller(f, () => {});
+    f.start();
+    await f.advance(1500);
+    navRoot(f).querySelector('button').click();
+    await f.advance(46000);
+    assert.match(navRoot(f).querySelector('.status').textContent, /尚未定位/);
+});
+
+test('自动更新地址和版本与发布配置一致', () => {
+    const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
+    assert.match(source, new RegExp(`@version\\s+${pkg.version.replaceAll('.', '\\.')}`));
+    const expected = 'https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js';
+    assert.equal(source.match(/@updateURL\s+(\S+)/)[1], expected);
+    assert.equal(source.match(/@downloadURL\s+(\S+)/)[1], expected);
+});
+
+test('路由检测前新会话 DOM 已挂载，不会被误当成旧消息', async t => {
+    const f = fixture(t);
+    mockApi(f, url => tree([apiMessage(url.pathname.includes('/test') ? 'old' : 'new', '问题')]));
+    mountedMessage(f, 'old', '问题');
+    f.start();
+    await f.advance(1500);
+    f.window.history.pushState({}, '', '/c/new');
+    const current = mountedMessage(f, 'new', '问题');
+    await f.advance(1500);
+    navRoot(f).querySelector('button').click();
+    assert.equal(current.scrollOptions.block, 'start');
+});
+
+test('会话权限失败不会继续尝试其他历史接口或快速重试', async t => {
+    const f = fixture(t);
+    messages(f, ['当前问题']);
+    const requests = mockApi(f, () => { throw new Error('HTTP 403'); });
+    f.start();
+    await f.advance(10000);
+    assert.equal(requests.length, 2);
+    assert.match(navRoot(f).querySelector('.status').textContent, /失败/);
+});
+
+test('切换会话立即阻止旧定位任务继续滚动', async t => {
+    const f = fixture(t);
+    mockApi(f, () => tree([apiMessage('u1', '早期'), apiMessage('u2', '近期')]));
+    mountedMessage(f, 'u2', '近期');
+    let scrolls = 0;
+    virtualScroller(f, () => { scrolls++; });
+    f.start();
+    await f.advance(1500);
+    navRoot(f).querySelector('button').click();
+    const before = scrolls;
+    f.window.history.pushState({}, '', '/');
+    await f.advance(1500);
+    assert.equal(scrolls, before);
+});
+
+test('启动短暂收起后恢复展开，仍执行自动收起', async t => {
+    const f = fixture(t);
+    const bar = addSidebar(f, { open: false });
+    f.start();
+    await f.advance(500);
+    bar.setOpen(true);
+    await f.advance(2500);
+    assert.equal(bar.panel.hidden, true);
+    assert.equal(bar.clicks(), 1);
+});
+
+test('混合触摸设备连接鼠标时也启用自动收起', async t => {
+    const f = fixture(t);
+    f.window.matchMedia = query => ({ matches: query.includes('any-hover') });
+    const bar = addSidebar(f);
+    f.start();
+    await f.advance(1500);
+    assert.equal(bar.panel.hidden, true);
+});
+
+test('零宽度裁剪容器内的关闭按钮不会被点击', async t => {
+    const f = fixture(t);
+    addSidebar(f, { open: false });
+    const wrapper = f.document.createElement('div');
+    wrapper.style.overflow = 'hidden';
+    wrapper.dataset.width = '0';
+    const button = f.document.createElement('button');
+    button.dataset.testid = 'close-sidebar-button';
+    button.addEventListener('click', () => assert.fail('点击了裁剪隐藏的按钮'));
+    wrapper.append(button);
+    f.document.body.prepend(wrapper);
+    f.start();
+    await f.advance(2000);
+});
+
+test('完整参数不兼容时尝试普通消息树接口', async t => {
+    const f = fixture(t);
+    const requests = mockApi(f, url => {
+        if (url.searchParams.has('include_full_conversation')) throw new Error('HTTP 400');
+        return { conversation: tree([apiMessage('u1', '兼容问题')]) };
+    });
+    f.start();
+    await f.advance(1500);
+    assert.match(navRoot(f).querySelector('.status').textContent, /全部 1/);
+    assert.equal(requests.length, 3);
+});
+
+test('诊断窗口一键复制阶段错误和侧栏状态，关闭后移除窗口', async t => {
+    const f = fixture(t);
+    let copied = '';
+    f.window.GM_setClipboard = text => { copied = text; };
+    mockApi(f, () => { throw new Error('HTTP 403'); });
+    messages(f, ['当前问题']);
+    f.start();
+    await f.advance(1500);
+    assert.match(navRoot(f).querySelector('.status').textContent, /完整消息树：HTTP 403/);
+    f.menus.get('查看脚本状态')();
+    const host = f.document.getElementById('cghs-navigation-diagnostics');
+    const buttons = host.shadowRoot.querySelectorAll('button');
+    buttons[0].click();
+    await settlePromises();
+    assert.match(copied, /启动自动收起：默认启用/);
+    assert.match(copied, /完整消息树：HTTP 403/);
+    assert.equal(copied.includes('test-token'), false);
+    assert.equal(buttons[0].textContent, '已复制');
+    buttons[1].click();
+    assert.equal(host.isConnected, false);
+});
+
+test('启动完成后页面自行展开会再次收起，手动打开保持展开', async t => {
+    const f = fixture(t);
+    const bar = addSidebar(f, { open: false });
+    f.start();
+    await f.advance(3000);
+    bar.setOpen(true);
+    await f.advance(1500);
+    assert.equal(bar.panel.hidden, true);
+    bar.open.click();
+    await f.advance(2500);
+    assert.equal(bar.panel.hidden, false);
+});
+
+test('主动历史读取携带当前设备信息，认证接口不携带设备头', async t => {
+    const f = fixture(t);
+    f.document.cookie = 'oai-did=device-test';
+    mockApi(f, (url, options) => {
+        assert.equal(options.headers['oai-device-id'], 'device-test');
+        return tree([apiMessage('u1', '问题')]);
+    });
+    f.start();
+    await f.advance(1500);
+    assert.match(navRoot(f).querySelector('.status').textContent, /全部 1/);
+});
+
+function responseData(data) {
+    return { ok: true, json: async () => data, clone: () => ({ json: async () => data }) };
+}
+
+test('自身请求403后利用页面成功响应建立完整索引，不消耗原响应', async t => {
+    const f = fixture(t);
+    const data = tree([apiMessage('u1', '旧问题'), apiMessage('u2', '新问题')]);
+    f.window.fetch = async (url, options) => {
+        if (String(url).includes('/api/auth/session')) return responseData({ accessToken: 'test-token' });
+        if (new Headers(options?.headers).get('chatgpt-account-id')) return responseData(data);
+        return { ok: false, status: 403 };
+    };
+    messages(f, ['新问题']);
+    f.start();
+    await f.advance(1500);
+    assert.match(navRoot(f).querySelector('.status').textContent, /403/);
+    const response = await f.window.fetch('/backend-api/conversation/test', {
+        headers: { 'chatgpt-account-id': 'workspace-test', 'oai-device-id': 'device-test' },
+    });
+    assert.equal((await response.json()).current_node, 'u2');
+    await f.advance(1500);
+    assert.match(navRoot(f).querySelector('.status').textContent, /全部 2/);
+});
+
+test('页面分页响应提供工作区上下文后，主动读取携带相同工作区', async t => {
+    const f = fixture(t);
+    let authorized = 0;
+    f.window.fetch = async (url, options) => {
+        if (String(url).includes('/api/auth/session')) return responseData({ accessToken: 'test-token' });
+        if (String(url).includes('/messages')) return responseData({ messages: [] });
+        if (new Headers(options?.headers).get('chatgpt-account-id') === 'workspace-test') {
+            authorized++;
+            return responseData(tree([apiMessage('u1', '工作区问题')]));
+        }
+        return { ok: false, status: 403 };
+    };
+    messages(f, ['工作区问题']);
+    f.start();
+    await f.advance(1500);
+    await f.window.fetch('/backend-api/conversations/test/messages', { headers: { 'chatgpt-account-id': 'workspace-test' } });
+    await f.advance(1500);
+    assert.equal(authorized, 1);
+    assert.match(navRoot(f).querySelector('.status').textContent, /全部 1/);
 });

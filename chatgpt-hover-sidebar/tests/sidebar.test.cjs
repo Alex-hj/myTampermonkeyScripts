@@ -790,3 +790,24 @@ test('展开导航时新增问题保留展开状态与定位功能', async t => 
     root.querySelectorAll('button')[1].click();
     assert.equal(articles[1].scrollOptions.block, 'start');
 });
+
+test('加载中和新增问题同步时不显示状态文字，仅失败时显示错误文字', async t => {
+    const f = fixture(t);
+    let finishSession;
+    f.window.fetch = async (url) => {
+        if (String(url).includes('/api/auth/session')) {
+            return new Promise(resolve => { finishSession = resolve; });
+        }
+        return { ok: true, json: async () => ({}) };
+    };
+    messages(f, ['初始问题']);
+    f.start();
+    await f.advance(200);
+    const root = navRoot(f);
+    assert.equal(root.querySelector('.status').hidden, true);
+    finishSession({ ok: false, status: 500 });
+    await f.advance(1500);
+    assert.equal(root.querySelector('.status').hidden, false);
+    assert.match(root.querySelector('.status').textContent, /失败/);
+});
+

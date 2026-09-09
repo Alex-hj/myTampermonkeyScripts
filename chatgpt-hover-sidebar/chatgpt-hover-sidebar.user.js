@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT 左侧悬停展开 + 原生导航保护
 // @namespace    local.chatgpt-hover-sidebar
-// @version      1.2.0
+// @version      1.2.1
 // @homepageURL  https://github.com/Alex-hj/myTampermonkeyScripts
 // @updateURL    https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
@@ -822,7 +822,7 @@
         const incomplete = context?.status === 'ready' && state.entries.length !== context.entries.length;
         const text = state.notice || (incomplete ? '已发现新问题，正在同步索引…' : labels[context?.status]) || '';
         if (status.textContent !== text) status.textContent = text;
-        status.hidden = !state.notice && !incomplete && ['idle', 'ready'].includes(context?.status);
+        status.hidden = !state.notice && context?.status !== 'partial';
     }
 
     function diagnosticText() {
@@ -834,7 +834,7 @@
                 const label = element.getAttribute('aria-label') || element.getAttribute('data-testid') || element.title;
                 return `${label} [${isVisible(element) ? '可见' : '隐藏'}]`;
             });
-        return `脚本版本：1.2.0\n启动自动收起：默认启用\n`
+        return `脚本版本：1.2.1\n启动自动收起：默认启用\n`
             + `桌面鼠标条件：${desktop() ? '满足' : '不满足（窄屏或未检测到鼠标）'}\n`
             + `左侧栏：${sidebarState()}\n启动收起：${state.startup ? '等待中' : '已完成'}\n`
             + `展开/收起按钮：${!!toggleButton('open')} / ${!!toggleButton('close')}\n`
@@ -975,10 +975,9 @@
             return;
         }
         const entries = collectEntries();
-        const loading = state.conversation?.status === 'loading';
-        if (!entries.length && !state.host && !loading) return;
+        if (!entries.length && !state.host) return;
         createNavigation();
-        state.host.hidden = entries.length === 0 && !loading;
+        state.host.hidden = entries.length === 0;
         const dark = document.documentElement.classList.contains('dark')
             || getComputedStyle(document.documentElement).colorScheme === 'dark';
         if (state.host.hasAttribute('data-dark') !== dark) state.host.toggleAttribute('data-dark', dark);

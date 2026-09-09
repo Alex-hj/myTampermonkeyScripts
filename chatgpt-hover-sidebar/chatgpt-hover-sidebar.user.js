@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT 左侧悬停展开 + 原生导航保护
 // @namespace    local.chatgpt-hover-sidebar
-// @version      1.1.3
+// @version      1.2.0
 // @homepageURL  https://github.com/Alex-hj/myTampermonkeyScripts
 // @updateURL    https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
@@ -52,6 +52,8 @@
         closedSince: null,
         scriptClick: false, requestContext: null,
         fetch: null, captureInstalled: false,
+        capturedResponses: 0, captureSummary: '尚未观察到当前会话响应',
+        navigationCloseTimer: null, navigationExpanded: false, navigationHovered: false,
     };
 
     function requestConversation(url) {
@@ -98,24 +100,59 @@
         }
     }
 
-    async function captureConversationResponse(id, response) {
-        if (!response.ok || id !== conversationId()) return;
+    function acceptNativeIndex(context, entries, source) {
+        context.controller?.abort();
+        context.nativeRevision = (context.nativeRevision || 0) + 1;
+        context.entries = entries;
+        context.status = 'ready';
+        context.error = '';
+        context.attempts = [];
+        context.source = source;
+        context.retryAt = Date.now() + 60000;
+        queueRefresh();
+    }
+
+    function acceptNativePage(context, page) {
+        const cursor = pageCursor(page);
+        if (!page.messages.every(message => message && typeof message.id === 'string' && message.id)) {
+            throw new Error('消息缺少 ID');
+        }
+        if (!cursor) {
+            acceptNativeIndex(context, indexMessages(page.messages), '页面完整分页响应');
+            return;
+        }
+        context.controller?.abort();
+        context.nativeRevision = (context.nativeRevision || 0) + 1;
+        context.nativePage = page;
+        context.preferPagination = true;
+        if (!context.entries.length) context.entries = indexMessages(page.messages);
+        context.status = 'partial';
+        context.error = '已读取页面消息，等待补齐更早历史';
+        context.source = '页面分页响应（尚未完整）';
+        context.retryAt = 0;
+        queueRefresh();
+    }
+
+    async function captureConversationResponse(id, response, requestUrl) {
+        if (id !== conversationId()) return;
+        state.capturedResponses++;
+        state.captureSummary = `HTTP ${response.status || (response.ok ? 200 : '未知')}`;
+        if (!response.ok) return;
         try {
             const data = await response.clone().json();
             if (id !== conversationId()) return;
             syncConversation();
             const context = state.conversation;
-            const entries = indexMessages(activeBranch(data));
-            context.controller?.abort();
-            context.nativeRevision = (context.nativeRevision || 0) + 1;
-            context.entries = entries;
-            context.status = 'ready';
-            context.error = '';
-            context.attempts = [];
-            context.source = '页面成功响应';
-            context.retryAt = Date.now() + 60000;
-            queueRefresh();
-        } catch { /* 分页片段或未知格式交给完整历史读取流程，不冒充完整索引。 */ }
+            const page = data.conversation || data;
+            if (Array.isArray(page.messages)) {
+                state.captureSummary = `HTTP 200，分页消息 ${page.messages.length} 条`;
+                // 只有当前会话第一页才能作为完整分页链的起点，不能把中间页当成全部。
+                if (!new URL(requestUrl, location.origin).pathname.endsWith('/messages')) acceptNativePage(context, page);
+            } else {
+                state.captureSummary = 'HTTP 200，消息树';
+                acceptNativeIndex(context, indexMessages(activeBranch(data)), '页面成功响应');
+            }
+        } catch { state.captureSummary += '（未通过完整性/格式检查）'; }
     }
 
     function observePageRequests() {
@@ -127,11 +164,12 @@
             page.fetch = function (input, options) {
                 const result = Reflect.apply(original, this, arguments);
                 try {
-                    const id = requestConversation(typeof input === 'string' ? input : input?.url || String(input));
+                    const url = typeof input === 'string' ? input : input?.url || String(input);
+                    const id = requestConversation(url);
                     const method = options?.method || input?.method || 'GET';
                     if (id && method.toUpperCase() === 'GET') {
                         captureRequestHeaders(id, input, options);
-                        Promise.resolve(result).then(response => captureConversationResponse(id, response)).catch(() => {});
+                        Promise.resolve(result).then(response => captureConversationResponse(id, response, url)).catch(() => {});
                     }
                 } catch { /* 观察失败不改变页面 fetch 的返回值和异常行为。 */ }
                 return result;
@@ -224,9 +262,12 @@
         let cursor = '';
         let messages = [];
         const seen = new Set();
+        const firstPage = context.nativePage;
+        context.nativePage = null;
         for (let count = 0; count < CONFIG.maxHistoryPages; count++) {
             const path = cursor ? `${base}/messages?before=${encodeURIComponent(cursor)}&` : `${base}?`;
-            const page = await readJson(`${path}include_has_versions=true&num_turns=100`, context, token);
+            const page = count === 0 && firstPage ? firstPage
+                : await readJson(`${path}include_has_versions=true&num_turns=100`, context, token);
             if (!Array.isArray(page.messages)) throw new Error('历史消息格式变化');
             messages = [...page.messages, ...messages];
             cursor = pageCursor(page);
@@ -263,6 +304,10 @@
     }
 
     async function readHistoryFormats(context, token) {
+        if (context.preferPagination) {
+            context.phase = '历史分页';
+            return paginatedMessages(context, token);
+        }
         const base = `/backend-api/conversation/${encodeURIComponent(context.id)}`;
         const candidates = [
             ['完整消息树', `${base}?include_full_conversation=true`],
@@ -274,7 +319,9 @@
             try { return activeBranch(await readJson(path, context, token)); }
             catch (error) {
                 context.attempts.push(`${phase}：${error.message}`);
-                if (context.controller.signal.aborted || /HTTP (401|403|429)/.test(error.message)) throw error;
+                if (context.controller.signal.aborted || /HTTP (401|429)/.test(error.message)) throw error;
+                // 旧接口被拒绝不代表新版分页接口不可用；只尝试一次分页入口。
+                if (/HTTP 403/.test(error.message)) break;
             }
         }
         context.phase = '历史分页';
@@ -569,32 +616,43 @@
             :host { all: initial; color-scheme: light dark; font: 13px system-ui, sans-serif; }
             :host([hidden]) { display: none !important; }
             * { box-sizing: border-box; }
-            nav { position: fixed; right: 12px; top: 25vh; width: 30px; max-height: 50vh;
-                z-index: 1000; color: #555; }
-            .list { max-height: 50vh; overflow-y: auto; scrollbar-width: none; padding: 5px 0; }
-            button { display: flex; align-items: center; justify-content: flex-end; width: 30px;
-                height: 22px; padding: 7px 3px; border: 0; background: transparent;
-                cursor: pointer; border-radius: 5px; color: inherit; }
-            .tick { height: 3px; width: 12px; border-radius: 4px; background: #c4c4c4;
-                transition: width .15s, background .15s; }
-            button[aria-current="true"] .tick { width: 22px; background: #555; }
-            button:hover .tick, button:focus-visible .tick { width: 25px; background: #555; }
-            button:focus-visible { outline: 2px solid #888; outline-offset: 1px; }
-            .preview { position: fixed; right: 50px; width: min(300px, calc(100vw - 80px));
-                white-space: normal; overflow-wrap: anywhere; padding: 10px 13px;
-                border-radius: 12px; border: 1px solid #ddd; background: #fff;
-                color: #333; box-shadow: 0 4px 18px #0002; line-height: 1.5;
-                pointer-events: none; max-height: 160px; overflow: hidden; }
-            .preview[hidden] { display: none; }
+            nav { position: fixed; right: 12px; top: 50%; transform: translateY(-50%);
+                width: 38px; z-index: 1000; color: #171717; }
+            .list { width: 100%; max-height: min(60vh, 600px); overflow-y: auto;
+                scrollbar-width: none; overscroll-behavior: contain; padding: 6px 0; }
+            button { display: flex; align-items: center; justify-content: center; width: 100%;
+                height: 12px; padding: 0; border: 0; background: transparent;
+                cursor: pointer; color: inherit; font: inherit; text-align: left; }
+            .tick { height: 2px; width: 22px; flex-shrink: 0; border-radius: 3px; background: #b9b9b9; }
+            button[aria-current="true"] .tick { height: 3px; background: #171717; }
+            button:focus-visible { outline: 2px solid #888; outline-offset: -2px; }
+            .entry-label { display: none; min-width: 0; overflow: hidden;
+                white-space: nowrap; text-overflow: ellipsis; }
             .status { position: absolute; right: 0; bottom: calc(100% + 8px); width: 210px;
                 text-align: right; font-size: 11px; opacity: .8; pointer-events: none; }
+            .status[hidden] { display: none; }
             :host([data-dark]) nav { color: #ddd; }
             :host([data-dark]) .tick { background: #626262; }
-            :host([data-dark]) button[aria-current="true"] .tick,
-            :host([data-dark]) button:hover .tick { background: #ddd; }
-            :host([data-dark]) .preview { background: #303030; color: #ececec; border-color: #484848; }
-            @media (prefers-reduced-motion: reduce) { .tick { transition: none; } }
+            :host([data-dark]) button[aria-current="true"] .tick { background: #ececec; }
             @media (max-width: 899px) { nav { display: none; } }
+        ` + expandedNavigationStyles();
+    }
+
+    function expandedNavigationStyles() {
+        return `
+            nav[data-expanded="true"] { width: min(400px, calc(100vw - 32px)); }
+            nav[data-expanded="true"] .list { max-height: min(70vh, 600px); padding: 7px;
+                background: #fff; border: 1px solid #d4d4d4; border-radius: 20px;
+                box-shadow: 0 6px 18px #00000014; }
+            nav[data-expanded="true"] button { height: 44px; padding: 0 12px;
+                justify-content: flex-start; border-radius: 12px; font-size: 16px; line-height: 1.5; }
+            nav[data-expanded="true"] .tick { display: none; }
+            nav[data-expanded="true"] .entry-label { display: block; }
+            nav[data-expanded="true"] button[aria-current="true"] { background: #efefef; }
+            nav[data-expanded="true"] button:hover { background: #f5f5f5; }
+            :host([data-dark]) nav[data-expanded="true"] .list { background: #262626; border-color: #484848; }
+            :host([data-dark]) nav[data-expanded="true"] button[aria-current="true"] { background: #3c3c3c; }
+            :host([data-dark]) nav[data-expanded="true"] button:hover { background: #333; }
         `;
     }
 
@@ -607,26 +665,56 @@
         style.textContent = navigationStyles();
         const nav = document.createElement('nav');
         nav.setAttribute('aria-label', '对话问题导航（备用）');
+        nav.dataset.expanded = 'false';
         const list = document.createElement('div');
         list.className = 'list';
-        const preview = document.createElement('div');
-        preview.className = 'preview';
-        preview.hidden = true;
         const status = document.createElement('div');
         status.className = 'status';
         status.setAttribute('role', 'status');
         status.setAttribute('aria-live', 'polite');
-        nav.append(list, preview, status);
+        nav.append(list, status);
+        bindNavigationEvents(nav);
         state.root.append(style, nav);
         document.body.append(state.host);
         state.signature = '';
+        state.navigationExpanded = false;
     }
 
-    function previewEntry(button, entry) {
-        const preview = state.root.querySelector('.preview');
-        preview.textContent = entry.text.slice(0, 240);
-        preview.style.top = `${Math.max(12, Math.min(button.getBoundingClientRect().top, innerHeight - 180))}px`;
-        preview.hidden = false;
+    function centerActiveNavigationEntry() {
+        const list = state.root?.querySelector('.list');
+        const active = list?.querySelector('[aria-current="true"]');
+        if (!active) return;
+        // 只滚动导航自身，不使用 scrollIntoView，避免带动聊天正文。
+        list.scrollTop = Math.max(0, active.offsetTop - list.offsetTop - (list.clientHeight - active.offsetHeight) / 2);
+    }
+
+    function setNavigationExpanded(expanded) {
+        cancelTimer('navigationCloseTimer');
+        if (state.navigationExpanded === expanded) return;
+        state.navigationExpanded = expanded;
+        const nav = state.root?.querySelector('nav');
+        if (nav) nav.dataset.expanded = String(expanded);
+        requestAnimationFrame(centerActiveNavigationEntry);
+    }
+
+    function scheduleNavigationClose() {
+        cancelTimer('navigationCloseTimer');
+        state.navigationCloseTimer = setTimeout(() => setNavigationExpanded(false), 160);
+    }
+
+    function bindNavigationEvents(nav) {
+        nav.addEventListener('mouseenter', () => {
+            state.navigationHovered = true;
+            setNavigationExpanded(true);
+        });
+        nav.addEventListener('mouseleave', () => {
+            state.navigationHovered = false;
+            scheduleNavigationClose();
+        });
+        nav.addEventListener('focusin', () => setNavigationExpanded(true));
+        nav.addEventListener('focusout', event => {
+            if (!nav.contains(event.relatedTarget) && !state.navigationHovered) scheduleNavigationClose();
+        });
     }
 
     function scrollToMessage(target) {
@@ -734,6 +822,7 @@
         const incomplete = context?.status === 'ready' && state.entries.length !== context.entries.length;
         const text = state.notice || (incomplete ? '已发现新问题，正在同步索引…' : labels[context?.status]) || '';
         if (status.textContent !== text) status.textContent = text;
+        status.hidden = !state.notice && !incomplete && ['idle', 'ready'].includes(context?.status);
     }
 
     function diagnosticText() {
@@ -745,12 +834,13 @@
                 const label = element.getAttribute('aria-label') || element.getAttribute('data-testid') || element.title;
                 return `${label} [${isVisible(element) ? '可见' : '隐藏'}]`;
             });
-        return `脚本版本：1.1.3\n启动自动收起：默认启用\n`
+        return `脚本版本：1.2.0\n启动自动收起：默认启用\n`
             + `桌面鼠标条件：${desktop() ? '满足' : '不满足（窄屏或未检测到鼠标）'}\n`
             + `左侧栏：${sidebarState()}\n启动收起：${state.startup ? '等待中' : '已完成'}\n`
             + `展开/收起按钮：${!!toggleButton('open')} / ${!!toggleButton('close')}\n`
             + `收起规则：鼠标移出后统一收起（包括手动打开）\n`
             + `页面请求观察：${state.captureInstalled ? '已启用' : '不可用'}\n`
+            + `观察到的会话响应：${state.capturedResponses} 次\n最近响应：${state.captureSummary}\n`
             + `设备信息：${!!(deviceCookie() || state.requestContext?.headers['oai-device-id'])}\n`
             + `当前会话工作区信息：${state.requestContext?.id === context?.id && !!state.requestContext?.headers['chatgpt-account-id']}\n`
             + `索引来源：${context?.source || '暂无'}\n`
@@ -825,19 +915,23 @@
         button.setAttribute('aria-label', `问题 ${index + 1}：${entry.text.slice(0, 240)}`);
         const tick = document.createElement('span');
         tick.className = 'tick';
-        button.append(tick);
+        tick.setAttribute('aria-hidden', 'true');
+        const label = document.createElement('span');
+        label.className = 'entry-label';
+        label.textContent = entry.text;
+        button.title = entry.text.slice(0, 240);
+        button.append(tick, label);
         button.addEventListener('click', () => jumpToEntry(index));
-        const show = () => previewEntry(button, state.entries[index]);
-        const hide = () => { state.root.querySelector('.preview').hidden = true; };
-        button.addEventListener('mouseenter', show);
-        button.addEventListener('focus', show);
-        button.addEventListener('mouseleave', hide);
-        button.addEventListener('blur', hide);
         button.addEventListener('keydown', event => moveNavigationFocus(event, index));
         return button;
     }
 
     function moveNavigationFocus(event, index) {
+        if (event.key === 'Escape') {
+            setNavigationExpanded(false);
+            state.root.activeElement?.blur();
+            return;
+        }
         const buttons = [...state.root.querySelectorAll('button')];
         const destinations = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: buttons.length - 1 };
         if (!(event.key in destinations)) return;
@@ -854,10 +948,14 @@
             if (!entry.target?.isConnected) return;
             if (active === -1 || entry.target.getBoundingClientRect().top <= threshold) active = index;
         });
+        let changed = false;
         state.root.querySelectorAll('button').forEach((button, index) => {
             const value = String(index === active);
-            if (button.getAttribute('aria-current') !== value) button.setAttribute('aria-current', value);
+            if (button.getAttribute('aria-current') === value) return;
+            button.setAttribute('aria-current', value);
+            changed = true;
         });
+        if (changed && !state.navigationExpanded) centerActiveNavigationEntry();
     }
 
     function queueActiveUpdate() {
@@ -888,7 +986,6 @@
         const signature = JSON.stringify(entries.map(entry => [entry.id, entry.text]));
         if (signature !== state.signature) {
             state.root.querySelector('.list').replaceChildren(...entries.map(entryButton));
-            state.root.querySelector('.preview').hidden = true;
             state.signature = signature;
         }
         queueActiveUpdate();

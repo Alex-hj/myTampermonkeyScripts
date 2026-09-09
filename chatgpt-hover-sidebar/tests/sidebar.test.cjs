@@ -267,8 +267,8 @@ test('导航安全预览、点击定位、滚动高亮和键盘切换', async t 
     const root = f.document.getElementById('cghs-navigation').shadowRoot;
     const buttons = root.querySelectorAll('button');
     assert.equal(buttons[0].getAttribute('aria-current'), 'true');
-    buttons[0].dispatchEvent(new f.window.Event('mouseenter'));
-    assert.equal(root.querySelector('.preview').textContent, '<img src=x onerror=alert(1)>');
+    root.querySelector('nav').dispatchEvent(new f.window.Event('mouseenter'));
+    assert.equal(buttons[0].querySelector('.entry-label').textContent, '<img src=x onerror=alert(1)>');
     assert.equal(root.querySelector('img'), null);
     buttons[1].click();
     assert.equal(articles[1].scrollOptions.block, 'start');
@@ -479,13 +479,13 @@ test('路由检测前新会话 DOM 已挂载，不会被误当成旧消息', asy
     assert.equal(current.scrollOptions.block, 'start');
 });
 
-test('会话权限失败不会继续尝试其他历史接口或快速重试', async t => {
+test('旧接口403只补试一次新版分页，仍失败后退避', async t => {
     const f = fixture(t);
     messages(f, ['当前问题']);
     const requests = mockApi(f, () => { throw new Error('HTTP 403'); });
     f.start();
     await f.advance(10000);
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 3);
     assert.match(navRoot(f).querySelector('.status').textContent, /失败/);
 });
 
@@ -559,7 +559,7 @@ test('诊断窗口一键复制阶段错误和侧栏状态，关闭后移除窗�
     messages(f, ['当前问题']);
     f.start();
     await f.advance(1500);
-    assert.match(navRoot(f).querySelector('.status').textContent, /完整消息树：HTTP 403/);
+    assert.match(navRoot(f).querySelector('.status').textContent, /历史分页：HTTP 403/);
     f.menus.get('查看脚本状态')();
     const host = f.document.getElementById('cghs-navigation-diagnostics');
     const buttons = host.shadowRoot.querySelectorAll('button');
@@ -674,4 +674,119 @@ test('页面分页响应提供工作区上下文后，主动读取携带相同�
     await f.advance(1500);
     assert.equal(authorized, 1);
     assert.match(navRoot(f).querySelector('.status').textContent, /全部 1/);
+});
+
+test('旧消息树403仍能通过新版分页获得完整索引', async t => {
+    const f = fixture(t);
+    const requests = mockApi(f, url => {
+        if (url.pathname.includes('/conversation/')) throw new Error('HTTP 403');
+        return { messages: [apiMessage('u1', '分页问题')], page_info: { has_previous_page: false } };
+    });
+    f.start();
+    await f.advance(1500);
+    assert.match(navRoot(f).querySelector('.status').textContent, /全部 1/);
+    assert.equal(requests.length, 3);
+});
+
+test('认证401不尝试分页接口', async t => {
+    const f = fixture(t);
+    const requests = mockApi(f, () => { throw new Error('HTTP 401'); });
+    messages(f, ['已加载']);
+    f.start();
+    await f.advance(10000);
+    assert.equal(requests.length, 2);
+    assert.match(navRoot(f).querySelector('.status').textContent, /HTTP 401/);
+});
+
+test('页面完整分页响应可直接建立索引', async t => {
+    const f = fixture(t, { mode: 'off' });
+    f.window.fetch = async () => responseData({ messages: [apiMessage('u1', '原生分页问题')],
+        page_info: { has_previous_page: false } });
+    f.start();
+    await f.window.fetch('/backend-api/conversations/test');
+    await settlePromises();
+    f.menus.get('右侧导航：强制显示备用')();
+    await f.advance(1500);
+    assert.match(navRoot(f).querySelector('.status').textContent, /全部 1/);
+});
+
+test('页面不完整第一页作为分页起点，补齐历史且不重复请求第一页', async t => {
+    const f = fixture(t, { mode: 'off' });
+    let firstRequests = 0;
+    f.window.fetch = async url => {
+        if (String(url).includes('/api/auth/session')) return responseData({ accessToken: 'token' });
+        if (String(url).includes('/messages?')) return responseData({ messages: [apiMessage('u1', '早期')],
+            page_info: { has_previous_page: false } });
+        firstRequests++;
+        return responseData({ messages: [apiMessage('u2', '近期')],
+            page_info: { has_previous_page: true, start_cursor: 'older' } });
+    };
+    f.start();
+    await f.window.fetch('/backend-api/conversations/test');
+    await settlePromises();
+    f.menus.get('右侧导航：强制显示备用')();
+    await f.advance(1500);
+    assert.equal(firstRequests, 1);
+    assert.match(navRoot(f).querySelector('.status').textContent, /全部 2/);
+});
+
+test('原生中间分页不能被当作完整会话起点', async t => {
+    const f = fixture(t, { mode: 'off' });
+    f.window.fetch = async () => responseData({ messages: [apiMessage('u1', '中间页问题')],
+        page_info: { has_previous_page: false } });
+    let diagnostics;
+    f.window.GM_setClipboard = text => { diagnostics = text; };
+    f.start();
+    await f.window.fetch('/backend-api/conversations/test/messages?before=cursor');
+    await settlePromises();
+    f.menus.get('查看脚本状态')();
+    f.document.getElementById('cghs-navigation-diagnostics').shadowRoot.querySelector('button').click();
+    assert.match(diagnostics, /完整索引：idle/);
+    assert.match(diagnostics, /分页消息 1 条/);
+});
+
+test('导航默认缩略，悬停展开完整列表，离开后恢复缩略', async t => {
+    const f = fixture(t);
+    messages(f, ['第一个问题', '第二个问题']);
+    f.start();
+    const nav = navRoot(f).querySelector('nav');
+    assert.equal(nav.dataset.expanded, 'false');
+    nav.dispatchEvent(new f.window.Event('mouseenter'));
+    assert.equal(nav.dataset.expanded, 'true');
+    assert.equal(nav.querySelectorAll('.entry-label').length, 2);
+    nav.dispatchEvent(new f.window.Event('mouseleave'));
+    await f.advance(80);
+    nav.dispatchEvent(new f.window.Event('mouseenter'));
+    await f.advance(200);
+    assert.equal(nav.dataset.expanded, 'true');
+    nav.dispatchEvent(new f.window.Event('mouseleave'));
+    await f.advance(200);
+    assert.equal(nav.dataset.expanded, 'false');
+});
+
+test('键盘进入展开导航，Escape 收起，正常状态不显示状态文字', async t => {
+    const f = fixture(t);
+    f.window.history.replaceState({}, '', '/');
+    messages(f, ['问题']);
+    f.start();
+    const root = navRoot(f);
+    const button = root.querySelector('button');
+    button.focus();
+    assert.equal(root.querySelector('nav').dataset.expanded, 'true');
+    button.dispatchEvent(new f.window.KeyboardEvent('keydown', { key: 'Escape' }));
+    assert.equal(root.querySelector('nav').dataset.expanded, 'false');
+    assert.equal(root.querySelector('.status').hidden, true);
+});
+
+test('展开导航时新增问题保留展开状态与定位功能', async t => {
+    const f = fixture(t);
+    messages(f, ['原问题']);
+    f.start();
+    const root = navRoot(f);
+    root.querySelector('nav').dispatchEvent(new f.window.Event('mouseenter'));
+    const articles = messages(f, ['原问题', '新问题']);
+    await f.advance(1500);
+    assert.equal(root.querySelector('nav').dataset.expanded, 'true');
+    root.querySelectorAll('button')[1].click();
+    assert.equal(articles[1].scrollOptions.block, 'start');
 });

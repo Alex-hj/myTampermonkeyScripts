@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>ChatGPT 导航外观预览</title>
+<style>
+    body { margin: 0; background: #fafafa; color: #171717; font: 15px system-ui; }
+    .dark body { background: #212121; color: #eee; }
+    header { padding: 36px; max-width: 540px; }
+    header button { padding: 8px 16px; cursor: pointer; }
+    main { position: absolute; top: 0; left: 0; width: 1px; opacity: 0; pointer-events: none; }
+    article { height: 700px; }
+    body { overflow: hidden; }
+</style>
+<header>
+    <h2>导航外观预览</h2>
+    <p>把鼠标移到右侧短横线，展开完整问题列表；移出后恢复缩略状态。</p>
+    <button onclick="document.documentElement.classList.toggle('dark')">切换深浅主题</button>
+</header>
+<main aria-hidden="true"></main>
+<script>
+    const questions = [
+        '如何设置油猴脚本的自动更新？',
+        '进入会话后如何读取完整历史，而不需要先手动滚到最顶部？',
+        '如何保留 ChatGPT 原生导航？',
+        '为什么旧接口会返回 HTTP 403？',
+        '新版分页接口需要哪些参数？',
+        '如何定位尚未渲染的历史问题？',
+        '支持深色模式吗？',
+        '鼠标移出后自动收起左侧栏',
+        '键盘可以操作导航吗？',
+        '长问题如何显示？',
+        '发布新版前需要运行哪些检查？',
+    ];
+    for (const text of questions) {
+        const article = document.createElement('article');
+        const message = document.createElement('div');
+        message.dataset.messageAuthorRole = 'user';
+        message.textContent = text;
+        article.append(message);
+        document.querySelector('main').append(article);
+    }
+    if (location.search.includes('dark')) document.documentElement.classList.add('dark');
+</script>
+<script src="../chatgpt-hover-sidebar.user.js"></script>
+<script>
+    if (location.search.includes('expanded')) setTimeout(() => {
+        document.getElementById('cghs-navigation').shadowRoot.querySelector('nav')
+            .dispatchEvent(new Event('mouseenter'));
+    }, 100);
+</script>
+</html>

@@ -668,6 +668,157 @@ function copiedDiagnostics(f) {
     return value;
 }
 
+function renderVirtualMessages(f, main, items) {
+    const current = Math.max(0, items.findLastIndex(item => item.offset <= main.scrollTop));
+    const articles = items.slice(Math.max(0, current - 1), current + 3).map(item => {
+        const article = f.document.createElement('article');
+        const message = f.document.createElement('div');
+        message.dataset.messageAuthorRole = 'user';
+        message.dataset.messageId = item.id;
+        message.textContent = item.text;
+        article.append(message);
+        article.getBoundingClientRect = () => {
+            const top = 100 + item.offset - main.scrollTop;
+            return { top, bottom: top + 100, width: 700, height: 100 };
+        };
+        return article;
+    });
+    // 保持同一窗口中的节点，模拟虚拟列表只在窗口变化时重新挂载。
+    const ids = articles.map(article => article.firstElementChild.dataset.messageId).join(',');
+    if (main.dataset.mounted !== ids) {
+        main.dataset.mounted = ids;
+        main.replaceChildren(...articles);
+    }
+}
+
+function longConversation(f, options = {}) {
+    let total = 0;
+    const items = Array.from({ length: 300 }, (_, index) => {
+        const item = { id: `u${index}`, text: `问题 ${index}`, offset: total };
+        total += options.height?.(index) || 900;
+        return item;
+    });
+    mockApi(f, () => tree(items.map(item => apiMessage(item.id, item.text))));
+    const main = f.document.querySelector('main');
+    main.dataset.scrollRoot = '';
+    main.style.overflowY = 'auto';
+    Object.defineProperty(main, 'clientHeight', { value: 600 });
+    Object.defineProperty(main, 'scrollHeight', { get: () => total });
+    main.scrollTop = options.fromStart ? 0 : total - 600;
+    main.scrollCalls = [];
+    main.getBoundingClientRect = () => ({ top: 100, bottom: 700, width: 900, height: 600 });
+    main.scrollTo = ({ top }) => {
+        main.scrollCalls.push(top);
+        if (options.emptyWhileLoading && Math.abs(top - main.scrollTop) > 600) {
+            main.replaceChildren();
+            delete main.dataset.mounted;
+        }
+        main.scrollTop = top;
+        if (options.renderDelay) {
+            f.window.setTimeout(() => renderVirtualMessages(f, main, items), options.renderDelay);
+        } else renderVirtualMessages(f, main, items);
+    };
+    renderVirtualMessages(f, main, items);
+    return { main, items };
+}
+
+test('300个问题的远距离跳转在有限滚动内完成，最终按消息ID对齐', async t => {
+    const f = fixture(t);
+    const { main, items } = longConversation(f);
+    f.start();
+    await f.advance(1500);
+    navRoot(f).querySelectorAll('button')[40].click();
+    await f.advance(8000);
+    assert.match(copiedDiagnostics(f), /最近定位：已确认定位/);
+    assert.equal(main.scrollTop, items[40].offset - 72);
+    assert.ok(main.scrollCalls.length < 50, `实际滚动 ${main.scrollCalls.length} 次`);
+    assert.match(copiedDiagnostics(f), /定位滚动：\d+ 次，耗时 \d+ ms/);
+    t.diagnostic(copiedDiagnostics(f).match(/定位滚动：[^\n]+/)[0]);
+});
+
+test('异步挂载和不等高消息下向后搜索，跨过目标后缩小步幅准确定位', async t => {
+    const f = fixture(t);
+    const { main, items } = longConversation(f, { fromStart: true, renderDelay: 120,
+        height: index => index % 7 === 0 ? 2800 : 160 });
+    f.start();
+    await f.advance(1500);
+    navRoot(f).querySelectorAll('button')[243].click();
+    await f.advance(12000);
+    assert.match(copiedDiagnostics(f), /最近定位：已确认定位/);
+    assert.equal(main.scrollTop, items[243].offset - 72);
+    assert.ok(main.scrollCalls.some((top, index, calls) => index > 0 && top < calls[index - 1]));
+    assert.ok(main.scrollCalls.length < 60, `实际滚动 ${main.scrollCalls.length} 次`);
+    t.diagnostic(copiedDiagnostics(f).match(/定位滚动：[^\n]+/)[0]);
+});
+
+test('目标挂载后提前唤醒搜索，不等待固定轮询间隔', async t => {
+    const f = fixture(t);
+    const { main, items } = longConversation(f, { renderDelay: 30 });
+    f.start();
+    await f.advance(1500);
+    navRoot(f).querySelectorAll('button')[297].click();
+    await f.advance(250);
+    assert.equal(main.scrollTop, items[297].offset - 72);
+});
+
+test('虚拟窗口暂时清空时等待挂载，随后继续远距离定位', async t => {
+    const f = fixture(t);
+    const { main, items } = longConversation(f, { renderDelay: 180, emptyWhileLoading: true });
+    f.start();
+    await f.advance(1500);
+    navRoot(f).querySelectorAll('button')[40].click();
+    await f.advance(12000);
+    assert.match(copiedDiagnostics(f), /最近定位：已确认定位/);
+    assert.equal(main.scrollTop, items[40].offset - 72);
+    assert.ok(main.scrollCalls.length < 50, `实际滚动 ${main.scrollCalls.length} 次`);
+});
+
+test('到达历史边界后等待加载，消息到达时继续定位', async t => {
+    const f = fixture(t);
+    mockApi(f, () => tree([apiMessage('u1', '早期'), apiMessage('u2', '近期')]));
+    mountedMessage(f, 'u2', '近期');
+    let scrolls = 0;
+    const main = virtualScroller(f, () => {
+        if (++scrolls === 1) f.window.setTimeout(() => mountedMessage(f, 'u1', '早期'), 500);
+    });
+    main.scrollTop = 0;
+    f.start();
+    await f.advance(1500);
+    navRoot(f).querySelector('button').click();
+    await f.advance(400);
+    assert.equal(scrolls, 1);
+    await f.advance(1200);
+    assert.match(copiedDiagnostics(f), /最近定位：已确认定位/);
+});
+
+test('已对齐且稳定的消息不重复滚动', async t => {
+    const f = fixture(t);
+    const [article] = messages(f, ['稳定目标']);
+    const main = geometricScroller(f, article);
+    f.start();
+    navRoot(f).querySelector('button').click();
+    await f.advance(1200);
+    assert.equal(main.scrollCalls.length, 1);
+    assert.match(copiedDiagnostics(f), /最近定位：已确认定位/);
+});
+
+test('连续点击远处问题只完成最后一次定位', async t => {
+    const f = fixture(t);
+    const { main, items } = longConversation(f, { renderDelay: 120 });
+    f.start();
+    await f.advance(1500);
+    const buttons = navRoot(f).querySelectorAll('button');
+    buttons[40].click();
+    await f.advance(100);
+    buttons[210].click();
+    await f.advance(8000);
+    assert.match(copiedDiagnostics(f), /最近定位：已确认定位/);
+    assert.equal(main.scrollTop, items[210].offset - 72);
+    const count = main.scrollCalls.length;
+    await f.advance(1500);
+    assert.equal(main.scrollCalls.length, count);
+});
+
 test('定位只滚动正文容器，并在布局漂移后继续校正直到稳定', async t => {
     const f = fixture(t);
     const [article] = messages(f, ['定位测试']);

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT 左侧悬停展开 + 原生导航保护
 // @namespace    local.chatgpt-hover-sidebar
-// @version      1.2.4
+// @version      1.2.5
 // @homepageURL  https://github.com/Alex-hj/myTampermonkeyScripts
 // @updateURL    https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
@@ -34,6 +34,11 @@
         maxHistoryPages: 200,
         jumpTimeout: 45000,
         jumpTopInset: 72,
+        jumpMaxStep: 16,
+        jumpPollDelay: 320,
+        jumpMutationDelay: 80,
+        jumpSettleDelay: 160,
+        jumpStableDuration: 400,
         startupStableDelay: 1000,
     });
     const PREFIX = 'cghs-navigation';
@@ -574,8 +579,9 @@
     function loadedEntries() {
         const context = state.conversation;
         const nodes = rawMessages();
-        if (context) context.observed = new Map(nodes.map(node => [node, messageFingerprint(node)]));
-        return nodes.filter(node => context?.stale.get(node) !== messageFingerprint(node)).map(element => {
+        const observed = new Map(nodes.map(node => [node, messageFingerprint(node)]));
+        if (context) context.observed = observed;
+        return nodes.filter(node => context?.stale.get(node) !== observed.get(node)).map(element => {
             const target = messageTarget(element);
             const text = normalizeText(element.innerText || element.textContent);
             const ids = messageIds(element, target);
@@ -761,9 +767,12 @@
 
     function cancelJump() {
         if (!state.jump) return;
-        state.jump.cancelled = true;
-        state.jump.result = '已取消';
+        const job = state.jump;
+        job.cancelled = true;
+        job.result = '已取消';
+        job.elapsed = Date.now() - job.startedAt;
         state.jump = null;
+        job.resume?.();
         state.notice = '';
     }
 
@@ -805,26 +814,45 @@
             && location.pathname === job.context.key;
     }
 
-    function stepTowardsEntry(job, entries) {
-        const root = conversationScroller();
+    function jumpSearchDirection(job, entries) {
         const wanted = entries.findIndex(entry => entry.id === job.id);
         const mounted = entries.map((entry, index) => entry.target?.isConnected ? index : -1)
             .filter(index => index >= 0);
+        if (!mounted.length || wanted < 0) return { direction: job.direction || -1, gap: null };
+        const nearest = mounted.reduce((a, b) => Math.abs(a - wanted) < Math.abs(b - wanted) ? a : b);
+        return { direction: wanted < nearest ? -1 : 1, gap: Math.abs(wanted - nearest) };
+    }
+
+    function updateJumpStep(job, direction, gap) {
+        if (gap === null) return;
+        if (job.direction && job.direction !== direction) {
+            // 越过目标后保留缩小后的上限，避免再次加速导致来回跳过。
+            job.stepLimit = Math.max(0.15, job.stepRatio / 2);
+            job.stepRatio = job.stepLimit;
+        } else {
+            const limit = gap > 10 ? CONFIG.jumpMaxStep : gap > 3 ? 4 : 0.75;
+            job.stepRatio = Math.min(limit, job.stepLimit, job.stepRatio * 2);
+        }
+        job.direction = direction;
+    }
+
+    function stepTowardsEntry(job, entries) {
+        const root = conversationScroller();
+        const { direction, gap } = jumpSearchDirection(job, entries);
+        if (gap === null) {
+            job.emptySince ??= Date.now();
+            // 虚拟窗口暂时清空时先等挂载，避免连续滚动使异步渲染一直追不上。
+            if (Date.now() - job.emptySince < 900) return;
+        } else job.emptySince = null;
         const height = root.clientHeight || innerHeight;
         const max = Math.max(0, root.scrollHeight - height);
-        let direction = job.direction || -1;
-        if (mounted.length && wanted < mounted[0]) direction = -1;
-        if (mounted.length && wanted > mounted[mounted.length - 1]) direction = 1;
-        if (mounted.length && wanted >= mounted[0] && wanted <= mounted[mounted.length - 1]) {
-            const nearest = mounted.reduce((a, b) => Math.abs(a - wanted) < Math.abs(b - wanted) ? a : b);
-            direction = wanted < nearest ? -1 : 1;
-        }
-        if (job.direction && job.direction !== direction) job.stepRatio = Math.max(0.15, job.stepRatio / 2);
-        job.direction = direction;
+        updateJumpStep(job, direction, gap);
         const top = Math.max(0, Math.min(max, root.scrollTop + direction * height * job.stepRatio));
-        // 小步重叠滚动，给虚拟列表留下挂载目标消息的机会；边界轻推触发历史加载。
+        job.atBoundary = direction < 0 ? top === 0 : top === max;
+        // 根据已挂载消息的顺序粗找，再缩小步幅；不按问题数量推算像素位置。
         root.scrollTo({ top: top === root.scrollTop && max > 0 ? Math.max(0, Math.min(max, top - direction * 24)) : top,
             behavior: 'instant' });
+        job.scrolls++;
     }
 
     function resolveJumpEntry(job, entries) {
@@ -835,13 +863,50 @@
 
     function confirmJumpTarget(job, target) {
         const top = target.getBoundingClientRect().top;
-        const stable = job.lastTarget === target && Math.abs(top - job.lastTop) <= 4 && targetIsAligned(target);
+        const aligned = targetIsAligned(target);
+        const sameTarget = job.lastTarget === target;
+        const stable = sameTarget && Math.abs(top - job.lastTop) <= 4 && aligned;
         job.stableFrames = stable ? job.stableFrames + 1 : 0;
+        if (!stable) job.stableSince = Date.now();
         job.lastTarget = target;
         job.lastTop = top;
-        if (job.stableFrames >= 2) return true;
-        scrollToMessage(target);
+        if (job.stableFrames >= 2 && Date.now() - job.stableSince >= CONFIG.jumpStableDuration) return true;
+        if (!sameTarget || !aligned) {
+            scrollToMessage(target);
+            job.scrolls++;
+        }
         return false;
+    }
+
+    function waitForJumpProgress(job, deadline) {
+        const delay = job.lastTarget ? CONFIG.jumpSettleDelay : job.atBoundary ? 900 : CONFIG.jumpPollDelay;
+        const startedAt = Date.now();
+        return new Promise(resolve => {
+            let timer;
+            let accelerated = false;
+            job.resume = () => {
+                clearTimeout(timer);
+                job.resume = null;
+                job.wake = null;
+                resolve();
+            };
+            job.wake = () => {
+                if (job.lastTarget || accelerated) return;
+                accelerated = true;
+                clearTimeout(timer);
+                const remaining = Math.max(0, CONFIG.jumpMutationDelay - (Date.now() - startedAt));
+                timer = setTimeout(job.resume, Math.min(remaining, Math.max(0, deadline - Date.now())));
+            };
+            timer = setTimeout(job.resume, Math.min(delay, Math.max(0, deadline - Date.now())));
+        });
+    }
+
+    function wakeJumpForMessages(records) {
+        const job = state.jump;
+        if (!job?.wake || !records || !jumpStillActive(job)) return;
+        const main = document.querySelector('main');
+        if (main && records.some(record => main.contains(record.target)
+            && (record.type === 'childList' || record.attributeName?.startsWith('data-')))) job.wake();
     }
 
     async function locateUnloaded(job) {
@@ -867,7 +932,7 @@
                 job.lastTarget = null;
                 stepTowardsEntry(job, entries);
             }
-            await new Promise(resolve => setTimeout(resolve, 400));
+            await waitForJumpProgress(job, deadline);
         }
         if (jumpStillActive(job)) {
             state.notice = '尚未定位到此问题，请重试或手动加载历史';
@@ -883,7 +948,8 @@
         // 使用点击时的消息身份重新查找节点，不能信任上一次渲染保留的 DOM 引用。
         const job = { id: entry.id, text: entry.text, originalTarget: entry.target,
             context: state.conversation, cancelled: false, attempts: 0, stableFrames: 0,
-            stepRatio: 0.75, result: '定位中' };
+            stepRatio: 0.75, stepLimit: CONFIG.jumpMaxStep, scrolls: 0,
+            startedAt: Date.now(), result: '定位中' };
         state.jump = job;
         state.lastJump = job;
         state.notice = '正在定位历史问题…（Esc 取消）';
@@ -897,7 +963,8 @@
         }
         finally {
             if (state.jump === job) state.jump = null;
-            if (state.lastJump === job) state.lastJump = { result: job.result, attempts: job.attempts };
+            if (state.lastJump === job) state.lastJump = { result: job.result, attempts: job.attempts,
+                scrolls: job.scrolls, elapsed: job.elapsed ?? Date.now() - job.startedAt };
             updateNavigationStatus();
         }
     }
@@ -923,7 +990,7 @@
                 const label = element.getAttribute('aria-label') || element.getAttribute('data-testid') || element.title;
                 return `${label} [${isVisible(element) ? '可见' : '隐藏'}]`;
             });
-        return `脚本版本：1.2.4\n启动自动收起：默认启用\n`
+        return `脚本版本：1.2.5\n启动自动收起：默认启用\n`
             + `桌面鼠标条件：${desktop() ? '满足' : '不满足（窄屏或未检测到鼠标）'}\n`
             + `左侧栏：${sidebarState()}\n启动收起：${state.startup ? '等待中' : '已完成'}\n`
             + `展开/收起按钮：${!!toggleButton('open')} / ${!!toggleButton('close')}\n`
@@ -934,6 +1001,8 @@
             + `当前会话工作区信息：${state.requestContext?.id === context?.id && !!state.requestContext?.headers['chatgpt-account-id']}\n`
             + `索引来源：${context?.source || '暂无'}\n`
             + `最近定位：${state.lastJump?.result || '尚未点击'}，检查 ${state.lastJump?.attempts || 0} 次\n`
+            + `定位滚动：${state.lastJump?.scrolls || 0} 次，耗时 ${state.lastJump?.elapsed
+                ?? (state.jump ? Date.now() - state.jump.startedAt : 0)} ms\n`
             + `备用导航：${state.mode}\n完整索引：${context?.status}\n`
             + `${context?.error || ''}\n${(context?.attempts || []).join('\n')}\n`
             + `侧栏按钮：\n${buttons.join('\n') || '未找到语义标签'}`;
@@ -1089,8 +1158,9 @@
     }
 
     function queueRefresh(records) {
-        if (!document.body) return;
+        if (!document?.body) return;
         if (records && records.every(record => record.target === state.host)) return;
+        wakeJumpForMessages(records);
         if (!state.refreshTimer) state.refreshTimer = setTimeout(refresh, 180);
     }
 
@@ -1160,7 +1230,8 @@
         }, true);
         const observer = new MutationObserver(queueRefresh);
         observer.observe(document.body, { childList: true, subtree: true, attributes: true,
-            attributeFilter: ['class', 'style', 'aria-expanded', 'aria-hidden', 'data-testid'] });
+            attributeFilter: ['class', 'style', 'aria-expanded', 'aria-hidden', 'data-testid',
+                'data-message-id', 'data-message-author-role', 'data-turn-id', 'data-turn-id-container'] });
         // 低频补偿 SPA 替换、延迟 hydration、主题更新和点击未生效的情况。
         setInterval(refresh, 1200);
         refresh();

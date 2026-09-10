@@ -1,6 +1,6 @@
 {
   "name": "chatgpt-hover-sidebar",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "private": true,
   "description": "ChatGPT 左侧悬停侧栏与备用对话导航",
   "scripts": {

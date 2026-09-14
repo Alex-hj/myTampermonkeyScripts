@@ -182,7 +182,7 @@ test('手动打开的侧栏在鼠标移出后关闭', async t => {
     assert.equal(bar.panel.hidden, true);
 });
 
-test('菜单打开也不会阻止鼠标移出后自动关闭', async t => {
+test('菜单打开时暂停收起，关闭菜单后恢复', async t => {
     const f = fixture(t);
     const bar = addSidebar(f, { open: false });
     f.start();
@@ -194,8 +194,50 @@ test('菜单打开也不会阻止鼠标移出后自动关闭', async t => {
     f.document.body.append(menu);
     pointer(f, 800);
     await f.advance(2000);
-    assert.equal(bar.panel.hidden, true);
+    assert.equal(bar.panel.hidden, false);
     menu.remove();
+    await f.advance(1800);
+    assert.equal(bar.panel.hidden, true);
+});
+
+test('重命名输入框和富文本编辑结束前不收起，包括失焦时', async t => {
+    for (const tag of ['input', 'textarea', 'div']) {
+        const f = fixture(t);
+        const bar = addSidebar(f, { open: false });
+        f.start();
+        await f.advance(1500);
+        pointer(f, 5);
+        await f.advance(800);
+        pointer(f, 800);
+        await f.advance(100);
+        const editor = f.document.createElement(tag);
+        if (tag === 'div') {
+            editor.setAttribute('contenteditable', 'true');
+            editor.tabIndex = 0;
+        }
+        bar.panel.append(editor);
+        editor.focus();
+        await f.advance(2000);
+        assert.equal(bar.panel.hidden, false);
+        editor.blur();
+        await f.advance(1000);
+        assert.equal(bar.panel.hidden, false);
+        editor.remove();
+        await f.advance(1800);
+        assert.equal(bar.panel.hidden, true);
+    }
+});
+
+test('启动时正在重命名也不会强制收起', async t => {
+    const f = fixture(t);
+    const bar = addSidebar(f);
+    const editor = f.document.createElement('input');
+    bar.panel.append(editor);
+    editor.focus();
+    f.start();
+    await f.advance(1500);
+    assert.equal(bar.panel.hidden, false);
+    editor.remove();
     await f.advance(1800);
     assert.equal(bar.panel.hidden, true);
 });

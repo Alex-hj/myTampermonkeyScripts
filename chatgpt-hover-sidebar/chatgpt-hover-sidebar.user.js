@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         ChatGPT 左侧悬停展开 + 原生导航保护
+// @name         ChatGPT 左侧自动收起 + 右侧对话导航(原生导航失效会自动启用备用导航)
 // @namespace    local.chatgpt-hover-sidebar
-// @version      1.2.5
+// @version      1.2.6
 // @homepageURL  https://github.com/Alex-hj/myTampermonkeyScripts
 // @updateURL    https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
@@ -36,7 +36,7 @@
         jumpTopInset: 72,
         jumpMaxStep: 16,
         jumpPollDelay: 320,
-        jumpMutationDelay: 80,
+        jumpMutationDelay: 80,  
         jumpSettleDelay: 160,
         jumpStableDuration: 400,
         startupStableDelay: 1000,
@@ -475,7 +475,7 @@
                 if (Date.now() - state.closedSince >= CONFIG.startupStableDelay) state.startup = false;
             } else {
                 state.closedSince = null;
-                if (current === 'open') clickToggle('close');
+                if (current === 'open' && !sidebarCloseProtected()) clickToggle('close');
             }
             return;
         }
@@ -508,6 +508,19 @@
             .some(isVisible);
     }
 
+    function sidebarCloseProtected() {
+        if (document.getElementById(`${PREFIX}-diagnostics`)) return true;
+        // 重命名期间即使输入框失焦，也要等编辑结束后才恢复自动收起。
+        const editors = sidebar()?.querySelectorAll(
+            'input:not([type="hidden"]):not([disabled]):not([readonly]), '
+            + 'textarea:not([disabled]):not([readonly]), '
+            + '[contenteditable]:not([contenteditable="false"])');
+        if (editors && [...editors].some(isVisible)) return true;
+        // 对话操作菜单/重命名弹窗可能通过 portal 渲染在侧栏外。
+        return [...document.querySelectorAll('[role="menu"], [role="dialog"], [aria-modal="true"]')]
+            .some(isVisible);
+    }
+
     function openFromEdge() {
         state.openTimer = null;
         if (!desktop() || !state.pointer || state.pointer.x > CONFIG.edgeWidth) return;
@@ -517,8 +530,8 @@
 
     function closeFromHover() {
         state.closeTimer = null;
-        // 所有打开来源统一执行移出收起，焦点和菜单不再阻止关闭。
-        if (!desktop() || pointerInside() || sidebarState() !== 'open') return;
+        // 延时期间可能刚进入重命名，执行关闭前必须再次检查。
+        if (!desktop() || pointerInside() || sidebarState() !== 'open' || sidebarCloseProtected()) return;
         clickToggle('close');
     }
 
@@ -539,7 +552,7 @@
             state.openTimer = setTimeout(openFromEdge, CONFIG.openDelay);
         }
         if (!atEdge) cancelTimer('openTimer');
-        if (current !== 'open' || pointerInside()) {
+        if (current !== 'open' || pointerInside() || sidebarCloseProtected()) {
             cancelTimer('closeTimer');
             return;
         }
@@ -990,11 +1003,11 @@
                 const label = element.getAttribute('aria-label') || element.getAttribute('data-testid') || element.title;
                 return `${label} [${isVisible(element) ? '可见' : '隐藏'}]`;
             });
-        return `脚本版本：1.2.5\n启动自动收起：默认启用\n`
+        return `脚本版本：1.2.6\n启动自动收起：默认启用\n`
             + `桌面鼠标条件：${desktop() ? '满足' : '不满足（窄屏或未检测到鼠标）'}\n`
             + `左侧栏：${sidebarState()}\n启动收起：${state.startup ? '等待中' : '已完成'}\n`
             + `展开/收起按钮：${!!toggleButton('open')} / ${!!toggleButton('close')}\n`
-            + `收起规则：鼠标移出后统一收起（包括手动打开）\n`
+            + `收起规则：鼠标移出后收起（编辑、菜单或弹窗打开时暂停）\n`
             + `页面请求观察：${state.captureInstalled ? '已启用' : '不可用'}\n`
             + `观察到的会话响应：${state.capturedResponses} 次\n最近响应：${state.captureSummary}\n`
             + `设备信息：${!!(deviceCookie() || state.requestContext?.headers['oai-device-id'])}\n`

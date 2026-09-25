@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT 左侧自动收起 + 右侧对话导航(原生导航失效会自动启用备用导航)
 // @namespace    local.chatgpt-hover-sidebar
-// @version      1.2.6
+// @version      1.2.7
 // @homepageURL  https://github.com/Alex-hj/myTampermonkeyScripts
 // @updateURL    https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
@@ -46,8 +46,8 @@
         + '[data-testid="sidebar"], nav[aria-label="Chat history"], '
         + 'nav[aria-label="聊天历史记录"], nav[aria-label="聊天记录"]';
     const LABELS = {
-        open: /(?:open|expand)\s+(?:the\s+)?sidebar|(?:打开|展开|開啟|展開).*(?:侧栏|侧边栏|边栏|側欄|側邊欄)/i,
-        close: /(?:close|collapse)\s+(?:the\s+)?sidebar|(?:关闭|收起|折叠|關閉|收合).*(?:侧栏|侧边栏|边栏|側欄|側邊欄)/i,
+        open: /(?:open|expand|show)\s+(?:the\s+)?sidebar|(?:打开|展开|显示|開啟|展開|顯示).*(?:侧栏|侧边栏|边栏|側欄|側邊欄)/i,
+        close: /(?:close|collapse|hide)\s+(?:the\s+)?sidebar|(?:关闭|收起|折叠|隐藏|關閉|收合|隱藏).*(?:侧栏|侧边栏|边栏|側欄|側邊欄)/i,
     };
     const state = {
         startup: true, owned: false, pending: null, cooldown: 0,
@@ -1003,7 +1003,7 @@
                 const label = element.getAttribute('aria-label') || element.getAttribute('data-testid') || element.title;
                 return `${label} [${isVisible(element) ? '可见' : '隐藏'}]`;
             });
-        return `脚本版本：1.2.6\n启动自动收起：默认启用\n`
+        return `脚本版本：1.2.7\n启动自动收起：默认启用\n`
             + `桌面鼠标条件：${desktop() ? '满足' : '不满足（窄屏或未检测到鼠标）'}\n`
             + `左侧栏：${sidebarState()}\n启动收起：${state.startup ? '等待中' : '已完成'}\n`
             + `展开/收起按钮：${!!toggleButton('open')} / ${!!toggleButton('close')}\n`
@@ -1244,6 +1244,7 @@
         const observer = new MutationObserver(queueRefresh);
         observer.observe(document.body, { childList: true, subtree: true, attributes: true,
             attributeFilter: ['class', 'style', 'aria-expanded', 'aria-hidden', 'data-testid',
+                'aria-label', 'title', 'data-tooltip-content', 'aria-controls', 'hidden', 'inert',
                 'data-message-id', 'data-message-author-role', 'data-turn-id', 'data-turn-id-container'] });
         // 低频补偿 SPA 替换、延迟 hydration、主题更新和点击未生效的情况。
         setInterval(refresh, 1200);

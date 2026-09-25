@@ -270,6 +270,71 @@ test('忽略屏幕外和右侧的同名按钮', async t => {
     assert.equal(wrongButtons.length, 2);
 });
 
+test('新版显示/隐藏标签支持启动收起、悬停展开和离开收起', async t => {
+    for (const [openText, closeText] of [
+        ['显示侧边栏', '隐藏侧边栏'], ['顯示側邊欄', '隱藏側邊欄'], ['Show sidebar', 'Hide sidebar'],
+    ]) {
+        const f = fixture(t);
+        const bar = addSidebar(f);
+        bar.open.removeAttribute('data-testid');
+        bar.close.removeAttribute('data-testid');
+        bar.open.setAttribute('aria-label', openText);
+        bar.close.setAttribute('aria-label', closeText);
+        f.start();
+        await f.advance(1800);
+        assert.equal(bar.panel.hidden, true);
+        pointer(f, 20);
+        await f.advance(800);
+        assert.equal(bar.panel.hidden, false);
+        pointer(f, 600);
+        await f.advance(1500);
+        assert.equal(bar.panel.hidden, true);
+    }
+});
+
+test('诊断中的显示侧边栏和多个隐藏副本不会让启动卡在 unknown', async t => {
+    const f = fixture(t);
+    const bar = addSidebar(f, { open: false });
+    bar.open.removeAttribute('data-testid');
+    bar.close.removeAttribute('data-testid');
+    bar.open.setAttribute('aria-label', '显示侧边栏');
+    bar.close.setAttribute('aria-label', '隐藏侧边栏');
+    let wrongClicks = 0;
+    for (const attribute of ['hidden', 'aria-hidden', 'inert']) {
+        const wrapper = f.document.createElement('div');
+        wrapper.setAttribute(attribute, 'true');
+        for (const label of ['显示侧边栏', '隐藏侧边栏']) {
+            const button = f.document.createElement('button');
+            button.setAttribute('aria-label', label);
+            button.addEventListener('click', () => { wrongClicks++; });
+            wrapper.append(button);
+        }
+        f.document.body.prepend(wrapper);
+    }
+    f.start();
+    await f.advance(1800);
+    pointer(f, 20);
+    await f.advance(800);
+    assert.equal(bar.panel.hidden, false);
+    pointer(f, 600);
+    await f.advance(1500);
+    assert.equal(bar.panel.hidden, true);
+    assert.equal(wrongClicks, 0);
+});
+
+test('页面只更新按钮标签时及时重新识别并收起', async t => {
+    const f = fixture(t);
+    const bar = addSidebar(f);
+    bar.open.removeAttribute('data-testid');
+    bar.close.removeAttribute('data-testid');
+    f.start();
+    await f.advance(100);
+    assert.equal(bar.panel.hidden, false);
+    bar.close.setAttribute('aria-label', '隐藏侧边栏');
+    await f.advance(200);
+    assert.equal(bar.panel.hidden, true);
+});
+
 test('保留原生导航，自动隐藏备用；强制模式可启用并保存', async t => {
     const f = fixture(t);
     messages(f, ['问题一', '问题二']);

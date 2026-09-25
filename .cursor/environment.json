@@ -1,0 +1,4 @@
+{
+  "name": "chatgpt-hover-sidebar",
+  "install": "cd chatgpt-hover-sidebar && npm ci"
+}

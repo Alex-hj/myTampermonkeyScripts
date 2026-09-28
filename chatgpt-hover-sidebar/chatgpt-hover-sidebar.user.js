@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT 左侧自动收起 + 右侧对话导航(原生导航失效会自动启用备用导航)
 // @namespace    local.chatgpt-hover-sidebar
-// @version      1.2.7
+// @version      1.2.8
 // @homepageURL  https://github.com/Alex-hj/myTampermonkeyScripts
 // @updateURL    https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
@@ -401,10 +401,24 @@
     }
 
     function sidebar() {
-        return [...document.querySelectorAll(SIDEBARS)].find(element => {
+        const panel = [...document.querySelectorAll(SIDEBARS)].find(element => {
             const rect = element.getBoundingClientRect();
             return isVisible(element) && rect.left < 80 && rect.width >= 160;
         }) || null;
+        return sidebarContainer(panel || toggleButton('close')) || panel;
+    }
+
+    function sidebarContainer(element) {
+        let container = null;
+        const maxWidth = Math.min(420, innerWidth * 0.45);
+        // 聊天历史 nav 可能只覆盖下半部分；向上寻找包含搜索入口的完整窄栏。
+        for (let node = element; node && node !== document.body; node = node.parentElement) {
+            if (node === document.documentElement) break;
+            const rect = node.getBoundingClientRect();
+            if (rect.width > maxWidth) break; // 不把正文或全屏浮层当成侧栏。
+            if (rect.left < 80 && rect.width >= 160 && isVisible(node)) container = node;
+        }
+        return container;
     }
 
     function leftButton(element) {
@@ -1003,7 +1017,7 @@
                 const label = element.getAttribute('aria-label') || element.getAttribute('data-testid') || element.title;
                 return `${label} [${isVisible(element) ? '可见' : '隐藏'}]`;
             });
-        return `脚本版本：1.2.7\n启动自动收起：默认启用\n`
+        return `脚本版本：1.2.8\n启动自动收起：默认启用\n`
             + `桌面鼠标条件：${desktop() ? '满足' : '不满足（窄屏或未检测到鼠标）'}\n`
             + `左侧栏：${sidebarState()}\n启动收起：${state.startup ? '等待中' : '已完成'}\n`
             + `展开/收起按钮：${!!toggleButton('open')} / ${!!toggleButton('close')}\n`

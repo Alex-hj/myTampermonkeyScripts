@@ -182,6 +182,50 @@ test('手动打开的侧栏在鼠标移出后关闭', async t => {
     assert.equal(bar.panel.hidden, true);
 });
 
+test('搜索入口在历史 nav 外时，悬停搜索保持展开，移出完整侧栏才关闭', async t => {
+    for (const withHistoryNav of [true, false]) {
+        const f = fixture(t);
+        const bar = addSidebar(f);
+        bar.panel.id = 'new-sidebar-shell';
+        const search = f.document.createElement('button');
+        search.textContent = '搜索聊天';
+        search.dataset.top = '60';
+        bar.panel.append(search);
+        if (withHistoryNav) {
+            const history = f.document.createElement('nav');
+            history.setAttribute('aria-label', 'Chat history');
+            Object.assign(history.dataset, { top: '150', width: '280', height: '550' });
+            bar.panel.append(history);
+        }
+        f.start();
+        await f.advance(1500);
+        pointer(f, 5);
+        await f.advance(800);
+        pointer(f, 100, 'mouse', 75);
+        await f.advance(1500);
+        assert.equal(bar.panel.hidden, false, '未点击搜索时保持展开');
+        pointer(f, 281, 'mouse', 75);
+        await f.advance(400);
+        assert.equal(bar.panel.hidden, true, '离开完整侧栏后仍自动收起');
+    }
+});
+
+test('侧栏外层包含正文时，不扩大到整个页面', async t => {
+    const f = fixture(t);
+    const bar = addSidebar(f);
+    const layout = f.document.createElement('div');
+    Object.assign(layout.dataset, { width: '1400', height: '900' });
+    f.document.body.append(layout);
+    layout.append(bar.panel, f.document.querySelector('main'));
+    f.start();
+    await f.advance(1500);
+    pointer(f, 5);
+    await f.advance(800);
+    pointer(f, 600);
+    await f.advance(400);
+    assert.equal(bar.panel.hidden, true);
+});
+
 test('菜单打开时暂停收起，关闭菜单后恢复', async t => {
     const f = fixture(t);
     const bar = addSidebar(f, { open: false });

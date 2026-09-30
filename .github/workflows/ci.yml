@@ -1,0 +1,57 @@
+name: CI 与发布
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: chatgpt-hover-sidebar
+    steps:
+      - uses: actions/checkout@v4
+      # 版本以 src/header.txt 的 @version 为准；忘记改版本号就打标签会在这里直接失败。
+      - name: 标签必须与脚本 @version 一致
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(sed -n 's|^// @version[[:space:]]*||p' src/header.txt | tr -d '\r')
+          test "v$version" = "$TAG" || { echo "标签 $TAG 与 src/header.txt 的 @version（$version）不一致"; exit 1; }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: chatgpt-hover-sidebar/package-lock.json
+      - run: npm ci --ignore-scripts
+      # 语法检查针对最终发布的单文件脚本。
+      - run: npm run check
+      # 测试包含“构建产物与 src 同步”检查；忘记 npm run build 会在这里失败。
+      - run: npm test
+      - run: npm run build
+      # 只有版本标签才保存构建产物，交给 release 任务发布。
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: userscript
+          path: chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
+
+  # 推送 v* 版本标签且检查、测试都通过后，把构建好的脚本上传到同名 GitHub Release。
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: userscript
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/chatgpt-hover-sidebar.user.js

@@ -1,0 +1,4 @@
+# AI 对话历史与编辑器、索引的本地配置，不属于项目内容
+.specstory/
+.vscode/
+.cursorindexingignore

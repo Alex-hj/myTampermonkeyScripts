@@ -1,32 +1,8 @@
 # ChatGPT 左侧悬停侧栏与备用导航
 
-直接安装的 Tampermonkey 油猴脚本，无需构建。当前版本 **1.2.8**。桌面端加载页面时收起左侧栏，鼠标停留在最左侧 60px 区域 100ms 后展开，离开侧栏 250ms 后收起。
+直接安装的 Tampermonkey 油猴脚本，无需构建。桌面端加载页面时收起左侧栏，鼠标停留在最左侧 60px 区域 100ms 后展开，离开侧栏 250ms 后收起。
 
-1.2.8 修复搜索入口位于聊天历史列表外时，鼠标移向搜索入口导致提前收起的问题：从历史列表或关闭按钮向上识别完整侧栏容器，按完整侧栏范围判断鼠标是否移出。
-
-1.2.7 适配新版左侧栏按钮的“显示侧边栏 / 隐藏侧边栏”（含繁体和 Show / Hide sidebar）标签，修复侧栏状态一直为 `unknown`、无法自动收起或悬停展开的问题；按钮标签、关联容器或可见性属性变化后及时重新识别，保留旧版标签兼容。
-
-1.2.6 修复重命名对话时侧栏自动收起：侧栏编辑框、操作菜单或弹窗显示期间暂停收起，编辑结束且菜单/弹窗关闭后恢复。
-
-1.2.5 加速较远历史的定位：远处逐步增大滚动步幅，接近或越过目标后减小步幅；消息挂载后提前继续搜索，边界和空窗口等待页面加载。保留消息 ID 与稳定性校验，已对齐时不重复滚动。诊断增加滚动次数和耗时。
-
-1.2.4 右侧展开导航面板添加自定义细滚动条：支持标准 scrollbar 属性与 WebKit 兼容伪类，深浅色主题自适应高亮，缩略短横线模式继续隐藏滚动条。
-
-1.2.3 扩大左边缘悬停触发区域至 60px，降低呼出精度要求；右侧导航模式菜单项增加 ✅/○ 状态标记，切换后实时更新当前选中项。
-
-1.2.2 修正历史条目点击定位：按消息身份重新查找节点，补充嵌套消息 ID 和轮次 ID 匹配；只滚动正文容器，并持续校正位置，连续两次检查稳定后才确认成功。诊断信息新增最近定位结果和检查次数。
-
-1.2.1 去除右侧导航在后台读取或同步时的加载中状态提示（如“正在读取完整历史…”、“已发现新问题，正在同步索引…”），保持界面清爽无干扰；仅在接口读取失败或定位异常时展示错误提示。
-
-1.2.0 按原生导航的参考截图改为两种外观：默认紧凑短横线，悬停展开圆角问题列表；支持单行省略、当前问题高亮、深浅主题和键盘操作。历史读取和左侧栏行为保持不变。
-
-1.1.4 修正旧消息树接口返回 403 时跳过新版分页的错误；页面原生分页响应也可作为索引来源，完整第一页直接使用，部分第一页沿游标补齐历史。侧栏行为保持 1.1.3 不变。
-
-1.1.3 统一为“鼠标移出就收起”：手动打开也不固定侧栏，焦点、菜单或弹窗不再阻止移出关闭；鼠标在延时内返回侧栏会取消关闭。
-
-1.1.2 针对历史 HTTP 403 增加设备/当前会话工作区请求信息和页面成功响应观察；启动完成后页面自行展开侧栏也会再次收起。升级后必须刷新页面，让 `document-start` 的请求观察生效。
-
-1.1.1 增加诊断窗口的“一键复制”，显示历史请求的失败阶段和状态码；增加普通消息树接口回退，并修正启动状态过早确认及混合触摸/鼠标设备检测。
+更新记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 进入已保存的会话后自动读取当前分支的完整问题索引，无需先滚到顶部。点击未渲染的问题会自动滚动触发页面加载，再按消息 ID 确认位置。
 
@@ -34,7 +10,7 @@
 
 1. 浏览器安装并启用 Tampermonkey，允许它在 ChatGPT 网站运行。
 2. 禁用之前的侧栏脚本，避免两个脚本同时操作按钮。
-3. 发布到 GitHub 后，打开[脚本安装地址](https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js)，由 Tampermonkey 安装。也可以在控制面板新建脚本，复制本目录 `chatgpt-hover-sidebar.user.js` 的全部内容并保存。
+3. 打开[脚本安装地址](https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js)，由 Tampermonkey 安装。也可以在控制面板新建脚本，复制本目录 `chatgpt-hover-sidebar.user.js` 的全部内容并保存。
 4. 刷新 ChatGPT 页面。若完全无效，检查 Tampermonkey 是否显示该脚本正在运行，以及浏览器是否允许扩展运行用户脚本。
 
 ## 行为
@@ -93,7 +69,7 @@
 
 ## 配置与兼容范围
 
-脚本顶部 `CONFIG` 可调整触发宽度、展开/收起延迟和最小桌面宽度。
+脚本中的 `CONFIG`（源码位于 `src/config.js`）可调整触发宽度、展开/收起延迟和最小桌面宽度。
 
 ChatGPT 的 DOM 会随版本、账号实验和语言变化。脚本识别常见 `data-testid`、中英文侧栏标签和关联 `aria-controls`；无法保证覆盖所有页面版本。没有可靠识别到按钮时保持等待，不会猜测点击其他功能按钮。
 
@@ -105,13 +81,26 @@ ChatGPT 的 DOM 会随版本、账号实验和语言变化。脚本识别常见 
 
 接口适配参考：[会话分页与完整性说明](https://github.com/bujue3709/GPT-Conversation-Toolkit/blob/main/README.en.md)。
 
+## 源码结构
+
+`src/` 按职责拆成 ES 模块，`npm run build` 用 esbuild 打包成单个 `chatgpt-hover-sidebar.user.js`。产物不压缩、保留中文字符串，但源码里的注释不会进入产物。安装和自动更新使用的始终是这个产物，用户不需要构建。
+
+- `main.js`：入口，注册监听并启动刷新循环；`scheduler.js`：刷新调度。
+- `sidebar-*.js`：左侧栏识别、开关点击、悬停控制与暂停收起的保护判断。
+- `history-*.js`、`request-*.js`、`native-index.js`：历史索引读取与页面请求观察。
+- `navigation-*.js`、`native-navigation.js`：右侧备用导航。
+- `jump.js`、`scroll-geometry.js`：点击问题后的滚动定位。
+- `diagnostics.js`、`menus.js`：诊断窗口与油猴菜单。
+- `config.js`、`state.js`、`utils.js`、`conversation.js`、`entries.js`：常量、运行状态与公共工具。
+- `header.txt`：UserScript 元数据头，`@version` 在这里维护。
+
 ## GitHub 发布与自动更新
 
 已配置 `Alex-hj/myTampermonkeyScripts` 的 `main` 分支 Raw 地址作为 `@updateURL` 和 `@downloadURL`。脚本的 `@name` 和 `@namespace` 保持不变。
 
-1. 这次先把本地改动提交并推送到 GitHub 的 `main` 分支。
-2. 原来安装的 `1.0.0` 没有更新地址，需要手动安装一次 `1.1.0`（或复制新版完整内容覆盖原脚本），完成更新来源的接入。
-3. 后续发布时递增 `.user.js` 顶部的 `@version`，同步 `package.json` 和 `package-lock.json` 的版本，验证后提交并推送即可。不需要打包、压缩、发布 npm 包或创建 GitHub Release。
+1. 修改 `src/` 后运行 `npm run build` 重新生成 `chatgpt-hover-sidebar.user.js`。产物必须和源码一起提交，测试会检查两者是否同步。
+2. 发布新版本时只需手动修改 `src/header.txt` 的 `@version`，再运行 `npm run bump`：它以该版本号为准，同步 `package.json`、`package-lock.json`，并重新构建脚本。然后在 `CHANGELOG.md`、`GREASYFORK.md` 补充更新说明，运行 `npm test` 验证后提交、推送。不需要压缩或发布 npm 包。
+3. 推送形如 `v1.2.9` 的版本标签（`git tag v1.2.9`，再 `git push origin v1.2.9`）后，GitHub Actions 会先校验标签与 `@version` 一致，再检查、测试、构建，并把 `chatgpt-hover-sidebar.user.js` 上传到同名的 GitHub Release。油猴自动更新仍读取 `main` 上的文件，与 Release 无关。
 4. 用户需要开启 Tampermonkey 的脚本更新检查，并能访问 `raw.githubusercontent.com`。检查按油猴设置的周期执行；手动检查更新可以立即验证。安装更新后刷新 ChatGPT 页面。
 
 不要把更新地址改成固定 commit 或版本 tag；保持指向 `main` 上相同的文件路径。仅修改 `package.json` 的版本不会触发油猴更新。
@@ -121,10 +110,11 @@ ChatGPT 的 DOM 会随版本、账号实验和语言变化。脚本识别常见 
 ```powershell
 cd chatgpt-hover-sidebar
 npm.cmd ci --ignore-scripts --cache .npm-cache
+npm.cmd run build
 npm.cmd run check
 npm.cmd test
 ```
 
-测试在 jsdom 模拟页面中验证动态加载、点击重试、所有打开来源的移出收起、原生导航保护和备用导航行为。模拟 DOM 不代表已在登录后的 ChatGPT 实站通过验证。
+测试按主题拆在 `tests/*.test.cjs`，共用夹具在 `tests/support.cjs`；GitHub Actions 会在推送到 `main` 和 Pull Request 时自动运行检查与测试，推送 `v*` 版本标签时还会发布 Release。测试在 jsdom 模拟页面中验证动态加载、点击重试、所有打开来源的移出收起、原生导航保护和备用导航行为。模拟 DOM 不代表已在登录后的 ChatGPT 实站通过验证。
 
 实站验收：刷新已展开侧栏的页面；从左边缘移入/移出；手动打开侧栏；打开侧栏会话菜单；切换会话并发送新问题；检查原生导航；通过扩展菜单强制显示备用导航并点击定位。

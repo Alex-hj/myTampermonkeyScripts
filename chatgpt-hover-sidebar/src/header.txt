@@ -1,0 +1,19 @@
+// ==UserScript==
+// @name         ChatGPT 左侧自动收起 + 右侧对话导航(原生导航失效会自动启用备用导航)
+// @namespace    local.chatgpt-hover-sidebar
+// @version      1.2.8
+// @homepageURL  https://github.com/Alex-hj/myTampermonkeyScripts
+// @updateURL    https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
+// @downloadURL  https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
+// @description  启动收起左侧栏，靠左悬停展开；保留原生导航，提供仿原生备用对话导航。
+// @match        https://chatgpt.com/*
+// @match        https://www.chatgpt.com/*
+// @match        https://chat.openai.com/*
+// @run-at       document-start
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_registerMenuCommand
+// @grant        GM_setClipboard
+// @grant        unsafeWindow
+// @noframes
+// ==/UserScript==

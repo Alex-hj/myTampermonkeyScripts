@@ -4,10 +4,13 @@
   "private": true,
   "description": "ChatGPT 左侧悬停侧栏与备用对话导航",
   "scripts": {
+    "build": "node scripts/build.mjs",
+    "bump": "node scripts/bump.mjs",
     "check": "node --check chatgpt-hover-sidebar.user.js",
     "test": "node --test tests/*.test.cjs"
   },
   "devDependencies": {
+    "esbuild": "0.28.2",
     "jsdom": "26.1.0"
   }
 }

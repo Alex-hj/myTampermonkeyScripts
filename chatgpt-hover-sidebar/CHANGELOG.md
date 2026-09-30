@@ -1,6 +1,6 @@
 # 更新记录
 
-## 未发布
+## 1.3.0
 
 - 适配新版页面结构，修复右侧导航点击历史问题后一直停在“正在定位历史问题…”、最终提示“尚未定位到此问题”的问题：新增对 `data-chatgpt-search-unit-key`（`:user` 后缀）用户消息块及 `data-chatgpt-search-message-ids` 的识别，并兼容正文容器为 `column-reverse`（`scrollTop` 为负数）的滚动定位；旧版页面结构仍保留支持。
 - 鼠标移出左侧栏后的自动收起延时由 250ms 调整为 500ms（`CONFIG.closeDelay`），避免鼠标稍微滑出边缘就立刻收起。

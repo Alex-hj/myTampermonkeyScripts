@@ -2,12 +2,22 @@
 import { state } from './state.js';
 import { normalizeText } from './utils.js';
 
+// 用户消息：当前页面以 data-chatgpt-search-unit-key 的 ":user" 后缀标记消息块，
+// 旧页面使用 data-message-author-role。
+const USER_MESSAGES = 'main [data-message-author-role="user"], [data-chatgpt-search-unit-key$=":user"]';
+
 export function rawMessages() {
-    return [...document.querySelectorAll('main [data-message-author-role="user"]')];
+    return [...document.querySelectorAll(USER_MESSAGES)];
+}
+
+// 当前页面把消息 ID 放在 data-chatgpt-search-message-ids 中，多个 ID 以空白分隔。
+function searchMessageIds(node) {
+    return (node.getAttribute('data-chatgpt-search-message-ids') || '').split(/\s+/).filter(Boolean);
 }
 
 function messageFingerprint(node) {
-    return `${node.getAttribute('data-message-id') || ''}:${node.textContent}`;
+    const id = node.getAttribute('data-message-id') || searchMessageIds(node)[0] || '';
+    return `${id}:${node.textContent}`;
 }
 
 function loadedEntries() {
@@ -24,7 +34,8 @@ function loadedEntries() {
 }
 
 function messageTarget(element) {
-    const turn = element.closest('[data-testid^="conversation-turn-"], [data-turn-id-container]');
+    const turn = element.closest('[data-testid^="conversation-turn-"], [data-turn-id-container], '
+        + '[data-content-search-turn-key]');
     if (turn) return turn;
     const article = element.closest('article');
     return article?.querySelectorAll('[data-message-author-role="user"]').length === 1 ? article : element;
@@ -40,6 +51,7 @@ function messageIds(element, target) {
             if (value) ids.push(value);
         }
     }
+    ids.push(...searchMessageIds(element));
     return [...new Set(ids)];
 }
 

@@ -224,29 +224,78 @@ function copiedDiagnostics(f) {
     return value;
 }
 
+// 旧页面结构：article 内的 div 带 data-message-author-role 与 data-message-id。
+function classicUserArticle(f, item) {
+    const article = f.document.createElement('article');
+    const message = f.document.createElement('div');
+    message.dataset.messageAuthorRole = 'user';
+    message.dataset.messageId = item.id;
+    message.textContent = item.text;
+    article.append(message);
+    return article;
+}
+
+// 当前页面结构：回合容器内，用户与助手消息块以 key 的 ":user" / ":assistant" 后缀区分。
+function currentUserTurn(f, item, index) {
+    const turn = f.document.createElement('div');
+    turn.dataset.contentSearchTurnKey = `fallback-turn-${index}`;
+    const user = f.document.createElement('div');
+    user.dataset.chatgptSearchUnitKey = `fallback-turn-${index}:0:user`;
+    user.dataset.chatgptSearchMessageIds = item.id;
+    user.textContent = item.text;
+    const assistant = f.document.createElement('div');
+    assistant.dataset.chatgptSearchUnitKey = `fallback-turn-${index}:2:assistant`;
+    assistant.dataset.chatgptSearchMessageIds = `a${item.id} a${item.id}`;
+    assistant.textContent = `回答 ${item.text}`;
+    turn.append(user, assistant);
+    return turn;
+}
+
+function currentTurns(f, items) {
+    const turns = items.map((item, index) => currentUserTurn(f, item, index));
+    f.document.querySelector('main').replaceChildren(...turns);
+    return turns;
+}
+
+// 已向上滚过的距离：反向滚动容器以底部为原点，scrollTop 为 [-(总高-可视高), 0]。
+function scrolledFromTop(main) {
+    return main.reversed ? main.scrollHeight - main.clientHeight + main.scrollTop : main.scrollTop;
+}
+
 function renderVirtualMessages(f, main, items) {
-    const current = Math.max(0, items.findLastIndex(item => item.offset <= main.scrollTop));
-    const articles = items.slice(Math.max(0, current - 1), current + 3).map(item => {
-        const article = f.document.createElement('article');
-        const message = f.document.createElement('div');
-        message.dataset.messageAuthorRole = 'user';
-        message.dataset.messageId = item.id;
-        message.textContent = item.text;
-        article.append(message);
-        article.getBoundingClientRect = () => {
-            const top = 100 + item.offset - main.scrollTop;
+    const current = Math.max(0, items.findLastIndex(item => item.offset <= scrolledFromTop(main)));
+    const first = Math.max(0, current - 1);
+    const wrappers = items.slice(first, current + 3).map((item, index) => {
+        const wrapper = main.currentLayout ? currentUserTurn(f, item, first + index)
+            : classicUserArticle(f, item);
+        wrapper.dataset.itemId = item.id;
+        wrapper.getBoundingClientRect = () => {
+            const top = 100 + item.offset - scrolledFromTop(main);
             return { top, bottom: top + 100, width: 700, height: 100 };
         };
-        return article;
+        return wrapper;
     });
     // 保持同一窗口中的节点，模拟虚拟列表只在窗口变化时重新挂载。
-    const ids = articles.map(article => article.firstElementChild.dataset.messageId).join(',');
+    const ids = wrappers.map(wrapper => wrapper.dataset.itemId).join(',');
     if (main.dataset.mounted !== ids) {
         main.dataset.mounted = ids;
-        main.replaceChildren(...articles);
+        main.replaceChildren(...wrappers);
     }
 }
 
+function initialScrollTop(main, fromStart) {
+    const span = main.scrollHeight - main.clientHeight;
+    if (main.reversed) return fromStart ? -span : 0;
+    return fromStart ? 0 : span;
+}
+
+// 浏览器会把反向容器的 scrollTop 限制在 [-(总高-可视高), 0]。
+function clampedScrollTop(main, top) {
+    if (!main.reversed) return top;
+    return Math.max(main.clientHeight - main.scrollHeight, Math.min(0, top));
+}
+
+// options.current：使用当前页面的消息结构；options.reversed：正文容器为 column-reverse。
 function longConversation(f, options = {}) {
     let total = 0;
     const items = Array.from({ length: 300 }, (_, index) => {
@@ -258,9 +307,12 @@ function longConversation(f, options = {}) {
     const main = f.document.querySelector('main');
     main.dataset.scrollRoot = '';
     main.style.overflowY = 'auto';
+    main.currentLayout = !!options.current;
+    main.reversed = !!options.reversed;
+    if (main.reversed) Object.assign(main.style, { display: 'flex', flexDirection: 'column-reverse' });
     Object.defineProperty(main, 'clientHeight', { value: 600 });
     Object.defineProperty(main, 'scrollHeight', { get: () => total });
-    main.scrollTop = options.fromStart ? 0 : total - 600;
+    main.scrollTop = initialScrollTop(main, options.fromStart);
     main.scrollCalls = [];
     main.getBoundingClientRect = () => ({ top: 100, bottom: 700, width: 900, height: 600 });
     main.scrollTo = ({ top }) => {
@@ -269,7 +321,7 @@ function longConversation(f, options = {}) {
             main.replaceChildren();
             delete main.dataset.mounted;
         }
-        main.scrollTop = top;
+        main.scrollTop = clampedScrollTop(main, top);
         if (options.renderDelay) {
             f.window.setTimeout(() => renderVirtualMessages(f, main, items), options.renderDelay);
         } else renderVirtualMessages(f, main, items);
@@ -298,5 +350,7 @@ module.exports = {
     geometricScroller,
     copiedDiagnostics,
     renderVirtualMessages,
+    currentTurns,
+    scrolledFromTop,
     longConversation,
 };

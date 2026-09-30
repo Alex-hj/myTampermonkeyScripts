@@ -148,11 +148,16 @@
   }
 
   // src/entries.js
+  var USER_MESSAGES = 'main [data-message-author-role="user"], [data-chatgpt-search-unit-key$=":user"]';
   function rawMessages() {
-    return [...document.querySelectorAll('main [data-message-author-role="user"]')];
+    return [...document.querySelectorAll(USER_MESSAGES)];
+  }
+  function searchMessageIds(node) {
+    return (node.getAttribute("data-chatgpt-search-message-ids") || "").split(/\s+/).filter(Boolean);
   }
   function messageFingerprint(node) {
-    return `${node.getAttribute("data-message-id") || ""}:${node.textContent}`;
+    const id = node.getAttribute("data-message-id") || searchMessageIds(node)[0] || "";
+    return `${id}:${node.textContent}`;
   }
   function loadedEntries() {
     const context = state.conversation;
@@ -167,7 +172,7 @@
     });
   }
   function messageTarget(element) {
-    const turn = element.closest('[data-testid^="conversation-turn-"], [data-turn-id-container]');
+    const turn = element.closest('[data-testid^="conversation-turn-"], [data-turn-id-container], [data-content-search-turn-key]');
     if (turn) return turn;
     const article = element.closest("article");
     return article?.querySelectorAll('[data-message-author-role="user"]').length === 1 ? article : element;
@@ -186,6 +191,7 @@
         if (value) ids.push(value);
       }
     }
+    ids.push(...searchMessageIds(element));
     return [...new Set(ids)];
   }
   function collectEntries() {
@@ -236,11 +242,18 @@
   }
 
   // src/scroll-geometry.js
+  function scrollRange(root, viewport = root.clientHeight) {
+    const span = Math.max(0, root.scrollHeight - viewport);
+    return getComputedStyle(root).flexDirection === "column-reverse" ? { min: -span, max: 0 } : { min: 0, max: span };
+  }
+  function clampScroll(value, { min, max }) {
+    return Math.max(min, Math.min(max, value));
+  }
   function scrollToMessage(target) {
     const root = conversationScroller(target);
     if (root.clientHeight > 0 && root.scrollHeight > root.clientHeight) {
       const offset = target.getBoundingClientRect().top - scrollBounds(root).top - CONFIG.jumpTopInset;
-      const top = Math.max(0, Math.min(root.scrollHeight - root.clientHeight, root.scrollTop + offset));
+      const top = clampScroll(root.scrollTop + offset, scrollRange(root));
       root.scrollTo({ top, behavior: "instant" });
     } else target.scrollIntoView({ behavior: "instant", block: "start" });
   }
@@ -266,8 +279,9 @@
     const bounds = scrollBounds(root);
     if (rect.width === 0 || rect.height === 0 || rect.top >= bounds.bottom - 24 || rect.bottom <= bounds.top) return false;
     if (Math.abs(rect.top - bounds.top - CONFIG.jumpTopInset) <= 12) return true;
-    if (root.scrollTop <= 1) return rect.top >= bounds.top && rect.top <= bounds.top + CONFIG.jumpTopInset + 12;
-    const atEnd = root.scrollHeight > root.clientHeight && root.scrollTop >= root.scrollHeight - root.clientHeight - 1;
+    const { min, max } = scrollRange(root);
+    if (root.scrollTop <= min + 1) return rect.top >= bounds.top && rect.top <= bounds.top + CONFIG.jumpTopInset + 12;
+    const atEnd = max > min && root.scrollTop >= max - 1;
     return atEnd && rect.top >= bounds.top && rect.top < bounds.bottom - 24;
   }
 
@@ -311,12 +325,13 @@
       if (Date.now() - job.emptySince < CONFIG.jumpEmptyWindowDelay) return;
     } else job.emptySince = null;
     const height = root.clientHeight || innerHeight;
-    const max = Math.max(0, root.scrollHeight - height);
+    const range = scrollRange(root, height);
     updateJumpStep(job, direction, gap);
-    const top = Math.max(0, Math.min(max, root.scrollTop + direction * height * job.stepRatio));
-    job.atBoundary = direction < 0 ? top === 0 : top === max;
+    const top = clampScroll(root.scrollTop + direction * height * job.stepRatio, range);
+    job.atBoundary = direction < 0 ? top === range.min : top === range.max;
+    const nudged = clampScroll(top - direction * 24, range);
     root.scrollTo({
-      top: top === root.scrollTop && max > 0 ? Math.max(0, Math.min(max, top - direction * 24)) : top,
+      top: top === root.scrollTop && range.max > range.min ? nudged : top,
       behavior: "instant"
     });
     job.scrolls++;

@@ -1,7 +1,7 @@
 // 点击问题后的滚动定位。
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { fixture, messages, apiMessage, tree, mockApi, navRoot, mountedMessage, virtualScroller, geometricScroller, copiedDiagnostics, longConversation } = require('./support.cjs');
+const { fixture, messages, apiMessage, tree, mockApi, navRoot, mountedMessage, virtualScroller, geometricScroller, copiedDiagnostics, currentTurns, scrolledFromTop, longConversation } = require('./support.cjs');
 
 test('点击未加载问题触发滚动加载，并以消息 ID 确认定位', async t => {
     const f = fixture(t);
@@ -207,4 +207,64 @@ test('重复文本通过嵌套消息ID区分，不误定位到另一问题', asy
     assert.equal(articles[0].scrollOptions, undefined);
     assert.equal(articles[1].scrollOptions.block, 'start');
     assert.equal(navRoot(f).querySelectorAll('button').length, 2);
+});
+
+test('当前页面结构：按消息块 key 识别用户问题，助手消息不计入目录', async t => {
+    const f = fixture(t);
+    const { main, items } = longConversation(f, { current: true });
+    f.start();
+    await f.advance(1500);
+    assert.equal(navRoot(f).querySelectorAll('button').length, 300);
+    navRoot(f).querySelectorAll('button')[40].click();
+    await f.advance(8000);
+    assert.match(copiedDiagnostics(f), /最近定位：已确认定位/);
+    assert.equal(main.scrollTop, items[40].offset - 72);
+});
+
+test('当前页面结构：重复文本通过消息块 ID 区分，不误定位到另一问题', async t => {
+    const f = fixture(t);
+    mockApi(f, () => tree([apiMessage('u1', '重复'), apiMessage('u2', '重复')]));
+    const turns = currentTurns(f, [{ id: 'u1', text: '重复' }, { id: 'u2', text: '重复' }]);
+    f.start();
+    await f.advance(1500);
+    navRoot(f).querySelectorAll('button')[1].click();
+    assert.equal(turns[0].scrollOptions, undefined);
+    assert.equal(turns[1].scrollOptions.block, 'start');
+    assert.equal(navRoot(f).querySelectorAll('button').length, 2);
+});
+
+test('反向滚动容器：从底部向上远距离跳转，按消息 ID 对齐', async t => {
+    const f = fixture(t);
+    const { main, items } = longConversation(f, { current: true, reversed: true });
+    f.start();
+    await f.advance(1500);
+    navRoot(f).querySelectorAll('button')[40].click();
+    await f.advance(8000);
+    assert.match(copiedDiagnostics(f), /最近定位：已确认定位/);
+    assert.equal(scrolledFromTop(main), items[40].offset - 72);
+    assert.ok(main.scrollCalls.length < 50, `实际滚动 ${main.scrollCalls.length} 次`);
+});
+
+test('反向滚动容器：从顶部向下异步挂载定位，跨过目标后缩小步幅', async t => {
+    const f = fixture(t);
+    const { main, items } = longConversation(f, { current: true, reversed: true, fromStart: true,
+        renderDelay: 120, height: index => index % 7 === 0 ? 2800 : 160 });
+    f.start();
+    await f.advance(1500);
+    navRoot(f).querySelectorAll('button')[243].click();
+    await f.advance(12000);
+    assert.match(copiedDiagnostics(f), /最近定位：已确认定位/);
+    assert.equal(scrolledFromTop(main), items[243].offset - 72);
+    assert.ok(main.scrollCalls.length < 60, `实际滚动 ${main.scrollCalls.length} 次`);
+});
+
+test('反向滚动容器：跳转到最早的问题时在顶部边界确认对齐', async t => {
+    const f = fixture(t);
+    const { main } = longConversation(f, { current: true, reversed: true });
+    f.start();
+    await f.advance(1500);
+    navRoot(f).querySelectorAll('button')[0].click();
+    await f.advance(8000);
+    assert.match(copiedDiagnostics(f), /最近定位：已确认定位/);
+    assert.equal(scrolledFromTop(main), 0);
 });

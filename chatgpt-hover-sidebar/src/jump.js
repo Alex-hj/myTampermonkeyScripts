@@ -3,7 +3,13 @@ import { CONFIG } from './config.js';
 import { isCurrentConversation, state } from './state.js';
 import { collectEntries } from './entries.js';
 import { updateNavigationStatus } from './navigation-status.js';
-import { conversationScroller, scrollToMessage, targetIsAligned } from './scroll-geometry.js';
+import {
+    clampScroll,
+    conversationScroller,
+    scrollRange,
+    scrollToMessage,
+    targetIsAligned,
+} from './scroll-geometry.js';
 
 export function cancelJump() {
     if (!state.jump) return;
@@ -51,12 +57,14 @@ function stepTowardsEntry(job, entries) {
         if (Date.now() - job.emptySince < CONFIG.jumpEmptyWindowDelay) return;
     } else job.emptySince = null;
     const height = root.clientHeight || innerHeight;
-    const max = Math.max(0, root.scrollHeight - height);
+    const range = scrollRange(root, height);
     updateJumpStep(job, direction, gap);
-    const top = Math.max(0, Math.min(max, root.scrollTop + direction * height * job.stepRatio));
-    job.atBoundary = direction < 0 ? top === 0 : top === max;
+    const top = clampScroll(root.scrollTop + direction * height * job.stepRatio, range);
+    job.atBoundary = direction < 0 ? top === range.min : top === range.max;
     // 根据已挂载消息的顺序粗找，再缩小步幅；不按问题数量推算像素位置。
-    root.scrollTo({ top: top === root.scrollTop && max > 0 ? Math.max(0, Math.min(max, top - direction * 24)) : top,
+    // 已在边界、无法继续前进时，向反方向挪动少许。
+    const nudged = clampScroll(top - direction * 24, range);
+    root.scrollTo({ top: top === root.scrollTop && range.max > range.min ? nudged : top,
         behavior: 'instant' });
     job.scrolls++;
 }

@@ -2,6 +2,7 @@
 
 ## 未发布
 
+- 适配新版页面结构，修复右侧导航点击历史问题后一直停在“正在定位历史问题…”、最终提示“尚未定位到此问题”的问题：新增对 `data-chatgpt-search-unit-key`（`:user` 后缀）用户消息块及 `data-chatgpt-search-message-ids` 的识别，并兼容正文容器为 `column-reverse`（`scrollTop` 为负数）的滚动定位；旧版页面结构仍保留支持。
 - 鼠标移出左侧栏后的自动收起延时由 250ms 调整为 500ms（`CONFIG.closeDelay`），避免鼠标稍微滑出边缘就立刻收起。
 - 源码拆分为 `src/` 下的 ES 模块，由 esbuild 打包生成单文件脚本；用户安装与自动更新方式不变。
 - 诊断窗口的脚本版本改为由脚本管理器提供，版本号只需在脚本头 `@version` 维护。

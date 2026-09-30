@@ -3,7 +3,7 @@
 export const CONFIG = Object.freeze({
     edgeWidth: 60,
     openDelay: 100,
-    closeDelay: 250,
+    closeDelay: 500,
     sidebarPadding: 0,
     animationDelay: 650,
     minimumWidth: 768,

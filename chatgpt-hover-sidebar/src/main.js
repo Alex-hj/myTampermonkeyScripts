@@ -30,7 +30,10 @@ function start() {
     document.head.append(marker);
     registerMenus();
     document.addEventListener('click', handleSidebarClick, true);
-    document.addEventListener('pointermove', handlePointer, { passive: true });
+    // 捕获阶段记录位置，避免页面阻止冒泡后仍用旧坐标判断鼠标是否移出。
+    document.addEventListener('pointermove', handlePointer, { passive: true, capture: true });
+    // 滚轮和触控板滚动不一定伴随鼠标移动，也需要更新悬停位置。
+    document.addEventListener('wheel', handlePointer, { passive: true, capture: true });
     document.documentElement.addEventListener('pointerleave', () => {
         state.pointer = null;
         evaluatePointer();

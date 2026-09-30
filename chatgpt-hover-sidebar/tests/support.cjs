@@ -104,6 +104,9 @@ function addSidebar(f, options = {}) {
     return { panel, open, close, setOpen, clicks: () => closeClicks };
 }
 
+// 鼠标移出侧栏后等待自动收起所需的时间：略大于 CONFIG.closeDelay（500ms）。
+const CLOSE_WAIT = 700;
+
 function pointer(f, x, type = 'mouse', y = 300) {
     const event = new f.window.Event('pointermove', { bubbles: true });
     Object.assign(event, { clientX: x, clientY: y, pointerType: type });
@@ -282,6 +285,7 @@ module.exports = {
     fixture,
     addSidebar,
     pointer,
+    CLOSE_WAIT,
     messages,
     nativeNavigation,
     apiMessage,

@@ -25,7 +25,7 @@
   var CONFIG = Object.freeze({
     edgeWidth: 60,
     openDelay: 100,
-    closeDelay: 250,
+    closeDelay: 500,
     sidebarPadding: 0,
     animationDelay: 650,
     minimumWidth: 768,
@@ -1294,7 +1294,8 @@ ${buttons.join("\n") || "未找到语义标签"}`;
     document.head.append(marker);
     registerMenus();
     document.addEventListener("click", handleSidebarClick, true);
-    document.addEventListener("pointermove", handlePointer, { passive: true });
+    document.addEventListener("pointermove", handlePointer, { passive: true, capture: true });
+    document.addEventListener("wheel", handlePointer, { passive: true, capture: true });
     document.documentElement.addEventListener("pointerleave", () => {
       state.pointer = null;
       evaluatePointer();

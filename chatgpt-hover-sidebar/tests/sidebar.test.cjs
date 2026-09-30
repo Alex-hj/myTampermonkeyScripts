@@ -1,7 +1,7 @@
 // 左侧栏：启动收起、边缘悬停展开、移出收起与各类保护。
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { fixture, addSidebar, pointer } = require('./support.cjs');
+const { fixture, addSidebar, pointer, CLOSE_WAIT } = require('./support.cjs');
 
 test('启动收起并重试 hydration 之前无效的点击', async t => {
     const f = fixture(t);
@@ -76,7 +76,7 @@ test('搜索入口在历史 nav 外时，悬停搜索保持展开，移出完整
         await f.advance(1500);
         assert.equal(bar.panel.hidden, false, '未点击搜索时保持展开');
         pointer(f, 281, 'mouse', 75);
-        await f.advance(400);
+        await f.advance(CLOSE_WAIT);
         assert.equal(bar.panel.hidden, true, '离开完整侧栏后仍自动收起');
     }
 });
@@ -93,7 +93,7 @@ test('侧栏外层包含正文时，不扩大到整个页面', async t => {
     pointer(f, 5);
     await f.advance(800);
     pointer(f, 600);
-    await f.advance(400);
+    await f.advance(CLOSE_WAIT);
     assert.equal(bar.panel.hidden, true);
 });
 
@@ -309,7 +309,7 @@ test('手动打开后鼠标在侧栏内保持，移出后焦点不阻止关闭',
     await f.advance(1500);
     assert.equal(bar.panel.hidden, false);
     pointer(f, 281);
-    await f.advance(400);
+    await f.advance(CLOSE_WAIT);
     assert.equal(bar.panel.hidden, true);
 });
 
@@ -324,9 +324,65 @@ test('收起延时内返回侧栏取消关闭，再离开底部时收起', async
     pointer(f, 600);
     await f.advance(100);
     pointer(f, 100);
-    await f.advance(500);
+    await f.advance(CLOSE_WAIT);
     assert.equal(bar.panel.hidden, false);
     pointer(f, 100, 'mouse', 701);
-    await f.advance(400);
+    await f.advance(CLOSE_WAIT);
     assert.equal(bar.panel.hidden, true);
+});
+
+test('页面拦截侧栏鼠标移动冒泡时仍更新位置并取消收起', async t => {
+    const f = fixture(t);
+    const bar = addSidebar(f);
+    f.start();
+    await f.advance(1500);
+    pointer(f, 5);
+    await f.advance(800);
+    pointer(f, 600);
+    await f.advance(100);
+    bar.panel.addEventListener('pointermove', event => event.stopPropagation());
+    const move = new f.window.Event('pointermove', { bubbles: true });
+    Object.assign(move, { clientX: 100, clientY: 300, pointerType: 'mouse' });
+    bar.panel.dispatchEvent(move);
+    await f.advance(1500);
+    assert.equal(bar.panel.hidden, false, '鼠标已经返回侧栏，旧关闭任务不能继续收起');
+    pointer(f, 600);
+    await f.advance(CLOSE_WAIT);
+    assert.equal(bar.panel.hidden, true, '实际移出后仍正常收起');
+});
+
+test('鼠标坐标过期时在侧栏滚动仍保持展开，正文滚动恢复收起', async t => {
+    const f = fixture(t);
+    const bar = addSidebar(f);
+    f.start();
+    await f.advance(1500);
+    pointer(f, 5);
+    await f.advance(800);
+    pointer(f, 600);
+    await f.advance(100);
+    bar.panel.addEventListener('wheel', event => event.stopPropagation());
+    bar.panel.dispatchEvent(new f.window.WheelEvent('wheel', {
+        bubbles: true, clientX: 100, clientY: 300, deltaY: 100,
+    }));
+    await f.advance(1500);
+    assert.equal(bar.panel.hidden, false, '无需再次移动鼠标，滚轮位置应覆盖旧坐标');
+    f.document.querySelector('main').dispatchEvent(new f.window.WheelEvent('wheel', {
+        bubbles: true, clientX: 600, clientY: 300, deltaY: 100,
+    }));
+    await f.advance(CLOSE_WAIT);
+    assert.equal(bar.panel.hidden, true, '正文区域的滚动不能让侧栏一直保持展开');
+});
+
+test('移出侧栏后先保持展开，超过收起延时才收起', async t => {
+    const f = fixture(t);
+    const bar = addSidebar(f);
+    f.start();
+    await f.advance(1500);
+    pointer(f, 5);
+    await f.advance(800);
+    pointer(f, 600);
+    await f.advance(400);
+    assert.equal(bar.panel.hidden, false, '收起延时内仍应保持展开');
+    await f.advance(CLOSE_WAIT);
+    assert.equal(bar.panel.hidden, true, '超过收起延时后应收起');
 });

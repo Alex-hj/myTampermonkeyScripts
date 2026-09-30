@@ -2,6 +2,7 @@
 
 ## 未发布
 
+- 鼠标移出左侧栏后的自动收起延时由 250ms 调整为 500ms（`CONFIG.closeDelay`），避免鼠标稍微滑出边缘就立刻收起。
 - 源码拆分为 `src/` 下的 ES 模块，由 esbuild 打包生成单文件脚本；用户安装与自动更新方式不变。
 - 诊断窗口的脚本版本改为由脚本管理器提供，版本号只需在脚本头 `@version` 维护。
 - 新增 `npm run bump`：以 `src/header.txt` 的 `@version` 为准，同步 `package.json`、`package-lock.json` 并重新构建；发布任务会校验版本标签与 `@version` 一致。

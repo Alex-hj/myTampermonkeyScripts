@@ -257,6 +257,16 @@ function currentTurns(f, items) {
     return turns;
 }
 
+// ChatGPT 会把切换前访问过的会话留在页面里：容器 display:none 没有渲染盒子，
+// 且在文档顺序上排在当前会话之前。这里用 hidden 属性模拟（夹具中 hidden 内的元素宽高为 0）。
+function hiddenConversationCache(f, texts) {
+    const cache = f.document.createElement('section');
+    cache.hidden = true;
+    cache.append(...texts.map((text, index) => currentUserTurn(f, { id: `cache${index}`, text }, index)));
+    f.document.querySelector('main').before(cache);
+    return cache;
+}
+
 // 已向上滚过的距离：反向滚动容器以底部为原点，scrollTop 为 [-(总高-可视高), 0]。
 function scrolledFromTop(main) {
     return main.reversed ? main.scrollHeight - main.clientHeight + main.scrollTop : main.scrollTop;
@@ -351,6 +361,7 @@ module.exports = {
     copiedDiagnostics,
     renderVirtualMessages,
     currentTurns,
+    hiddenConversationCache,
     scrolledFromTop,
     longConversation,
 };

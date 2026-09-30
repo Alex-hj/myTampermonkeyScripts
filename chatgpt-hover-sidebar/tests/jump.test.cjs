@@ -1,7 +1,7 @@
 // 点击问题后的滚动定位。
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { fixture, messages, apiMessage, tree, mockApi, navRoot, mountedMessage, virtualScroller, geometricScroller, copiedDiagnostics, currentTurns, scrolledFromTop, longConversation } = require('./support.cjs');
+const { fixture, messages, apiMessage, tree, mockApi, navRoot, mountedMessage, virtualScroller, geometricScroller, copiedDiagnostics, currentTurns, hiddenConversationCache, scrolledFromTop, longConversation } = require('./support.cjs');
 
 test('点击未加载问题触发滚动加载，并以消息 ID 确认定位', async t => {
     const f = fixture(t);
@@ -267,4 +267,31 @@ test('反向滚动容器：跳转到最早的问题时在顶部边界确认对�
     await f.advance(8000);
     assert.match(copiedDiagnostics(f), /最近定位：已确认定位/);
     assert.equal(scrolledFromTop(main), 0);
+});
+
+test('页面保留隐藏的其他会话缓存：缓存里的消息不计入问题目录', async t => {
+    const f = fixture(t);
+    mockApi(f, () => tree([apiMessage('u1', '问题 1'), apiMessage('u2', '问题 2')]));
+    hiddenConversationCache(f, ['缓存会话问题 A', '缓存会话问题 B']);
+    currentTurns(f, [{ id: 'u1', text: '问题 1' }, { id: 'u2', text: '问题 2' }]);
+    f.start();
+    await f.advance(1500);
+    const labels = [...navRoot(f).querySelectorAll('button')].map(button => button.title);
+    assert.deepEqual(labels, ['问题 1', '问题 2']);
+});
+
+test('页面保留隐藏的其他会话缓存：远距离定位仍滚动当前会话的容器', async t => {
+    const f = fixture(t);
+    const { main, items } = longConversation(f, { current: true, reversed: true });
+    // 真实页面没有 data-scroll-root，滚动容器只能从第一个渲染出来的消息向上查找。
+    main.removeAttribute('data-scroll-root');
+    // 真实页面里整页元素没有可滚动范围，对它滚动不会有任何效果。
+    f.document.documentElement.scrollTo = () => {};
+    hiddenConversationCache(f, ['缓存会话问题 A', '缓存会话问题 B']);
+    f.start();
+    await f.advance(1500);
+    navRoot(f).querySelectorAll('button')[40].click();
+    await f.advance(8000);
+    assert.match(copiedDiagnostics(f), /最近定位：已确认定位/);
+    assert.equal(scrolledFromTop(main), items[40].offset - 72);
 });

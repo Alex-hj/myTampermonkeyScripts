@@ -105,6 +105,10 @@
   function normalizeText(text) {
     return String(text || "").replace(/\s+/g, " ").trim();
   }
+  function hasRenderedBox(element) {
+    const { width, height } = element.getBoundingClientRect();
+    return width !== 0 || height !== 0;
+  }
   function isVisible(element) {
     if (!element || element.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
     const rect = element.getBoundingClientRect();
@@ -150,7 +154,7 @@
   // src/entries.js
   var USER_MESSAGES = 'main [data-message-author-role="user"], [data-chatgpt-search-unit-key$=":user"]';
   function rawMessages() {
-    return [...document.querySelectorAll(USER_MESSAGES)];
+    return [...document.querySelectorAll(USER_MESSAGES)].filter(hasRenderedBox);
   }
   function searchMessageIds(node) {
     return (node.getAttribute("data-chatgpt-search-message-ids") || "").split(/\s+/).filter(Boolean);

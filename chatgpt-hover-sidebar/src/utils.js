@@ -5,6 +5,12 @@ export function normalizeText(text) {
     return String(text || '').replace(/\s+/g, ' ').trim();
 }
 
+// display:none 的元素没有渲染盒子（宽高均为 0）；滚出视口的元素仍有盒子。
+export function hasRenderedBox(element) {
+    const { width, height } = element.getBoundingClientRect();
+    return width !== 0 || height !== 0;
+}
+
 export function isVisible(element) {
     if (!element || element.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
     const rect = element.getBoundingClientRect();

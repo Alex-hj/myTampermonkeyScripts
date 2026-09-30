@@ -1,13 +1,14 @@
 // 页面已挂载问题与完整历史索引的合并。
 import { state } from './state.js';
-import { normalizeText } from './utils.js';
+import { hasRenderedBox, normalizeText } from './utils.js';
 
 // 用户消息：当前页面以 data-chatgpt-search-unit-key 的 ":user" 后缀标记消息块，
 // 旧页面使用 data-message-author-role。
 const USER_MESSAGES = 'main [data-message-author-role="user"], [data-chatgpt-search-unit-key$=":user"]';
 
+// ChatGPT 会把切换前访问过的会话以 display:none 留在页面里，只取当前渲染出来的消息。
 export function rawMessages() {
-    return [...document.querySelectorAll(USER_MESSAGES)];
+    return [...document.querySelectorAll(USER_MESSAGES)].filter(hasRenderedBox);
 }
 
 // 当前页面把消息 ID 放在 data-chatgpt-search-message-ids 中，多个 ID 以空白分隔。

@@ -832,6 +832,9 @@
     if (toggleButton("open")) return "closed";
     return "unknown";
   }
+  function pageVisible() {
+    return document.visibilityState === "visible";
+  }
   function desktop() {
     return innerWidth >= CONFIG.minimumWidth && (matchMedia("(hover: hover) and (pointer: fine)").matches || matchMedia("(any-hover: hover) and (any-pointer: fine)").matches);
   }
@@ -893,7 +896,7 @@
 
   // src/sidebar-controller.js
   function maintainSidebar() {
-    if (!desktop()) return;
+    if (!desktop() || !pageVisible()) return;
     const current = sidebarState();
     settleToggle(current);
     if (state.startup) {

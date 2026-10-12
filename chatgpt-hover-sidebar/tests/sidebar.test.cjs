@@ -1,7 +1,7 @@
 // 左侧栏：启动收起、边缘悬停展开、移出收起与各类保护。
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { fixture, addSidebar, pointer, CLOSE_WAIT } = require('./support.cjs');
+const { fixture, setVisibility, addSidebar, pointer, CLOSE_WAIT } = require('./support.cjs');
 
 test('启动收起并重试 hydration 之前无效的点击', async t => {
     const f = fixture(t);
@@ -385,4 +385,21 @@ test('移出侧栏后先保持展开，超过收起延时才收起', async t => 
     assert.equal(bar.panel.hidden, false, '收起延时内仍应保持展开');
     await f.advance(CLOSE_WAIT);
     assert.equal(bar.panel.hidden, true, '超过收起延时后应收起');
+});
+
+test('后台标签页不收起被同步展开的侧栏，回到前台后恢复移出收起', async t => {
+    const f = fixture(t);
+    const bar = addSidebar(f);
+    f.start();
+    await f.advance(1500);
+    const startupClicks = bar.clicks();
+    setVisibility(f, 'hidden');
+    // 前台标签展开后，页面把侧栏状态同步到本标签：本标签没有任何点击。
+    bar.setOpen(true);
+    await f.advance(4000);
+    assert.equal(bar.panel.hidden, false, '后台页点击收起会经同步把前台页一并收起');
+    assert.equal(bar.clicks(), startupClicks, '后台页不应点击侧栏开关');
+    setVisibility(f, 'visible');
+    await f.advance(2500);
+    assert.equal(bar.panel.hidden, true, '回到前台后鼠标不在侧栏内，应恢复收起');
 });

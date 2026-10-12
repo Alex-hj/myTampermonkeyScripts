@@ -2,12 +2,12 @@
 import { CONFIG } from './config.js';
 import { state } from './state.js';
 import { cancelTimer } from './utils.js';
-import { desktop, sidebar, sidebarState } from './sidebar-detect.js';
+import { desktop, pageVisible, sidebar, sidebarState } from './sidebar-detect.js';
 import { interactionProtected, sidebarCloseProtected } from './sidebar-protection.js';
 import { clickToggle, settleToggle } from './sidebar-toggle.js';
 
 export function maintainSidebar() {
-    if (!desktop()) return;
+    if (!desktop() || !pageVisible()) return;
     const current = sidebarState();
     settleToggle(current);
     if (state.startup) {

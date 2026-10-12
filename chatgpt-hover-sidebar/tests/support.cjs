@@ -79,6 +79,11 @@ function fixture(t, options = {}) {
         start: () => window.eval(source) };
 }
 
+// 模拟标签页切到后台 / 回到前台（jsdom 默认总是 visible）。
+function setVisibility(f, value) {
+    Object.defineProperty(f.document, 'visibilityState', { value, configurable: true });
+}
+
 function addSidebar(f, options = {}) {
     const panel = f.document.createElement('aside');
     panel.id = 'stage-slideover-sidebar';
@@ -345,6 +350,7 @@ module.exports = {
     fakeClock,
     installGeometry,
     fixture,
+    setVisibility,
     addSidebar,
     pointer,
     CLOSE_WAIT,

@@ -63,6 +63,12 @@ export function sidebarState() {
     return 'unknown';
 }
 
+// 页面会把侧栏状态同步到所有标签页：后台标签页的自动收起会连带收起前台页，
+// 前台页再展开又被后台页收起，形成循环。因此后台标签页不操作侧栏。
+export function pageVisible() {
+    return document.visibilityState === 'visible';
+}
+
 export function desktop() {
     return innerWidth >= CONFIG.minimumWidth && (
         matchMedia('(hover: hover) and (pointer: fine)').matches

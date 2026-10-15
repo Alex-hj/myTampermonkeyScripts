@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT 左侧自动收起 + 右侧对话导航(原生导航失效会自动启用备用导航)
 // @namespace    local.chatgpt-hover-sidebar
-// @version      1.3.2
+// @version      1.3.3
 // @homepageURL  https://github.com/Alex-hj/myTampermonkeyScripts
 // @updateURL    https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alex-hj/myTampermonkeyScripts/main/chatgpt-hover-sidebar/chatgpt-hover-sidebar.user.js
@@ -415,7 +415,7 @@
       await waitForJumpProgress(job, deadline);
     }
     if (jumpStillActive(job)) {
-      state.notice = "尚未定位到此问题，请重试或手动加载历史";
+      state.notice = "未能跳转到所选问题，请重试或手动加载历史";
       job.result = "超时，未确认定位";
     }
   }
@@ -440,13 +440,13 @@
     };
     state.jump = job;
     state.lastJump = job;
-    state.notice = "正在定位历史问题…（Esc 取消）";
+    state.notice = "正在跳转到所选问题…（按 Esc 取消）";
     updateNavigationStatus();
     try {
       await locateUnloaded(job);
     } catch {
       if (jumpStillActive(job)) {
-        state.notice = "页面暂不支持定位，请手动加载历史";
+        state.notice = "页面暂不支持跳转，请手动加载历史";
         job.result = "定位异常";
       }
     } finally {

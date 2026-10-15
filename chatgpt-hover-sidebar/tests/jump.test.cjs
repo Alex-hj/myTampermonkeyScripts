@@ -44,7 +44,7 @@ test('定位超时给出提示，禁止宣称定位成功', async t => {
     await f.advance(1500);
     navRoot(f).querySelector('button').click();
     await f.advance(46000);
-    assert.match(navRoot(f).querySelector('.status').textContent, /尚未定位/);
+    assert.match(navRoot(f).querySelector('.status').textContent, /未能跳转/);
 });
 
 test('切换会话立即阻止旧定位任务继续滚动', async t => {

@@ -150,7 +150,7 @@ async function locateUnloaded(job) {
         await waitForJumpProgress(job, deadline);
     }
     if (jumpStillActive(job)) {
-        state.notice = '尚未定位到此问题，请重试或手动加载历史';
+        state.notice = '未能跳转到所选问题，请重试或手动加载历史';
         job.result = '超时，未确认定位';
     }
 }
@@ -167,12 +167,12 @@ export async function jumpToEntry(index) {
         startedAt: Date.now(), result: '定位中' };
     state.jump = job;
     state.lastJump = job;
-    state.notice = '正在定位历史问题…（Esc 取消）';
+    state.notice = '正在跳转到所选问题…（按 Esc 取消）';
     updateNavigationStatus();
     try { await locateUnloaded(job); }
     catch {
         if (jumpStillActive(job)) {
-            state.notice = '页面暂不支持定位，请手动加载历史';
+            state.notice = '页面暂不支持跳转，请手动加载历史';
             job.result = '定位异常';
         }
     }

@@ -15,6 +15,7 @@ import {
 import { cancelJump, wakeJumpForMessages } from './jump.js';
 import { queueActiveUpdate, refreshNavigation } from './navigation-view.js';
 import { registerMenus } from './menus.js';
+import { observeAppPromo } from './app-promo.js';
 
 function refresh() {
     state.refreshTimer = null;
@@ -65,6 +66,7 @@ function start() {
 if (!document.getElementById(MARKER_ID)) {
     configureScheduler({ onRefresh: refresh, onMutations: wakeJumpForMessages });
     observePageRequests();
+    observeAppPromo();
     if (document.body) start();
     else document.addEventListener('DOMContentLoaded', start, { once: true });
 }

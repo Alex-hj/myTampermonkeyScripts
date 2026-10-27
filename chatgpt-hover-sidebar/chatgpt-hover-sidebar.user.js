@@ -59,6 +59,10 @@
     open: /(?:open|expand|show)\s+(?:the\s+)?sidebar|(?:打开|展开|显示|開啟|展開|顯示).*(?:侧栏|侧边栏|边栏|側欄|側邊欄)/i,
     close: /(?:close|collapse|hide)\s+(?:the\s+)?sidebar|(?:关闭|收起|折叠|隐藏|關閉|收合|隱藏).*(?:侧栏|侧边栏|边栏|側欄|側邊欄)/i
   };
+  var APP_PROMO = Object.freeze({
+    dialog: '[role="dialog"][class*="beacon-modal-post_work_tab_onboarding_homepage_modal"]',
+    closeButton: ":scope > button"
+  });
 
   // src/state.js
   function readMode() {
@@ -1302,6 +1306,27 @@ ${buttons.join("\n") || "未找到语义标签"}`;
     GM_registerMenuCommand("查看脚本状态", showDiagnostics);
   }
 
+  // src/app-promo.js
+  var handled = /* @__PURE__ */ new WeakSet();
+  function findPromo(root) {
+    if (root.matches?.(APP_PROMO.dialog)) return root;
+    return root.querySelector?.(APP_PROMO.dialog) ?? null;
+  }
+  function dismissPromoIn(root) {
+    const dialog = findPromo(root);
+    if (!dialog || handled.has(dialog)) return;
+    const closeButton = dialog.querySelector(APP_PROMO.closeButton);
+    if (!closeButton) return;
+    handled.add(dialog);
+    closeButton.click();
+  }
+  function observeAppPromo() {
+    new MutationObserver((mutations) => {
+      for (const { addedNodes } of mutations) addedNodes.forEach((node) => dismissPromoIn(node));
+    }).observe(document, { childList: true, subtree: true });
+    dismissPromoIn(document);
+  }
+
   // src/main.js
   function refresh() {
     state.refreshTimer = null;
@@ -1365,6 +1390,7 @@ ${buttons.join("\n") || "未找到语义标签"}`;
   if (!document.getElementById(MARKER_ID)) {
     configureScheduler({ onRefresh: refresh, onMutations: wakeJumpForMessages });
     observePageRequests();
+    observeAppPromo();
     if (document.body) start();
     else document.addEventListener("DOMContentLoaded", start, { once: true });
   }

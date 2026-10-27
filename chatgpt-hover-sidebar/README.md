@@ -22,6 +22,7 @@
 - 无论手动打开、悬停打开或页面自动展开，鼠标移出侧栏都会收起；不再区分打开来源。
 - 鼠标在侧栏内部时保持展开；重命名等编辑期间、菜单或弹窗打开时暂停收起。普通按钮保留焦点不会阻止收起。
 - 窄屏及触摸设备不自动操作左侧栏。备用导航在宽度小于 900px 时隐藏。
+- 自动关闭首页「在 ChatGPT 应用中，体验更佳 / 下载应用」引导弹窗：弹窗一出现就点击它自带的关闭按钮，不点「下载应用」，也不删除页面节点；只处理这一个弹窗，其他对话框不受影响。
 
 ## 右侧导航
 
@@ -79,6 +80,8 @@ ChatGPT 的 DOM 会随版本、账号实验和语言变化。脚本识别常见 
 
 定位仍依赖 ChatGPT 自己加载并挂载历史 DOM；极长会话可能需要重试。脚本不会把自行生成的历史消息插入聊天正文。备用导航是相近交互的独立实现，不是对某一版原生导航的像素级复制。
 
+「下载应用」弹窗靠它在页面上固定的引导类名识别，关闭按钮取弹窗根节点的直接子按钮。ChatGPT 改版后这两处可能失效，失效时弹窗会照常出现，需要更新脚本适配。
+
 接口适配参考：[会话分页与完整性说明](https://github.com/bujue3709/GPT-Conversation-Toolkit/blob/main/README.en.md)。
 
 ## 源码结构
@@ -90,6 +93,7 @@ ChatGPT 的 DOM 会随版本、账号实验和语言变化。脚本识别常见 
 - `history-*.js`、`request-*.js`、`native-index.js`：历史索引读取与页面请求观察。
 - `navigation-*.js`、`native-navigation.js`：右侧备用导航。
 - `jump.js`、`scroll-geometry.js`：点击问题后的滚动定位。
+- `app-promo.js`：自动关闭「下载应用」引导弹窗。
 - `diagnostics.js`、`menus.js`：诊断窗口与油猴菜单。
 - `config.js`、`state.js`、`utils.js`、`conversation.js`、`entries.js`：常量、运行状态与公共工具。
 - `header.txt`：UserScript 元数据头，`@version` 在这里维护。

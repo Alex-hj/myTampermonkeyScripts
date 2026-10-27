@@ -41,3 +41,11 @@ export const LABELS = {
     open: /(?:open|expand|show)\s+(?:the\s+)?sidebar|(?:打开|展开|显示|開啟|展開|顯示).*(?:侧栏|侧边栏|边栏|側欄|側邊欄)/i,
     close: /(?:close|collapse|hide)\s+(?:the\s+)?sidebar|(?:关闭|收起|折叠|隐藏|關閉|收合|隱藏).*(?:侧栏|侧边栏|边栏|側欄|側邊欄)/i,
 };
+
+// 首页「在 ChatGPT 应用中，体验更佳 / 下载应用」引导弹窗（2026-10 实站抓取）：
+// 根节点是 Radix 对话框，类名带固定的引导标识（与界面语言无关）；
+// 关闭按钮是根节点的直接子按钮，没有 aria-label，文案只在 sr-only 里且随语言变化。
+export const APP_PROMO = Object.freeze({
+    dialog: '[role="dialog"][class*="beacon-modal-post_work_tab_onboarding_homepage_modal"]',
+    closeButton: ':scope > button',
+});

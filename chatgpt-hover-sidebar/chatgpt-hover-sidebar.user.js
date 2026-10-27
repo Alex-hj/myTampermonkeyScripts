@@ -64,9 +64,17 @@
     closeButton: ":scope > button"
   });
 
+  // src/storage.js
+  function readSetting(key, fallback) {
+    return typeof GM_getValue === "function" ? GM_getValue(key, fallback) : fallback;
+  }
+  function writeSetting(key, value) {
+    if (typeof GM_setValue === "function") GM_setValue(key, value);
+  }
+
   // src/state.js
   function readMode() {
-    const value = typeof GM_getValue === "function" ? GM_getValue("navigationMode", "auto") : "auto";
+    const value = readSetting("navigationMode", "auto");
     return ["auto", "always", "off"].includes(value) ? value : "auto";
   }
   var state = {
@@ -1171,6 +1179,37 @@
     updateNavigationStatus();
   }
 
+  // src/app-promo.js
+  var SETTING_KEY = "closeAppPromo";
+  var enabled = readSetting(SETTING_KEY, true) !== false;
+  var handled = /* @__PURE__ */ new WeakSet();
+  function isAppPromoEnabled() {
+    return enabled;
+  }
+  function toggleAppPromo() {
+    enabled = !enabled;
+    writeSetting(SETTING_KEY, enabled);
+  }
+  function findPromo(root) {
+    if (root.matches?.(APP_PROMO.dialog)) return root;
+    return root.querySelector?.(APP_PROMO.dialog) ?? null;
+  }
+  function dismissPromoIn(root) {
+    if (!enabled) return;
+    const dialog = findPromo(root);
+    if (!dialog || handled.has(dialog)) return;
+    const closeButton = dialog.querySelector(APP_PROMO.closeButton);
+    if (!closeButton) return;
+    handled.add(dialog);
+    closeButton.click();
+  }
+  function observeAppPromo() {
+    new MutationObserver((mutations) => {
+      for (const { addedNodes } of mutations) addedNodes.forEach((node) => dismissPromoIn(node));
+    }).observe(document, { childList: true, subtree: true });
+    dismissPromoIn(document);
+  }
+
   // src/diagnostics.js
   function scriptVersion() {
     return typeof GM_info === "object" ? GM_info.script.version : "未知";
@@ -1273,7 +1312,7 @@ ${buttons.join("\n") || "未找到语义标签"}`;
   function setMode(mode) {
     state.mode = mode;
     if (mode === "off") cancelJump();
-    if (typeof GM_setValue === "function") GM_setValue("navigationMode", mode);
+    writeSetting("navigationMode", mode);
     registerModeMenus();
     maintainHistory();
     refreshNavigation();
@@ -1290,9 +1329,17 @@ ${buttons.join("\n") || "未找到语义标签"}`;
       GM_registerMenuCommand(`${indicator} 右侧导航：${label}`, () => setMode(key), { id });
     }
   }
+  function registerAppPromoMenu() {
+    const [indicator, status] = isAppPromoEnabled() ? ["✅", "开"] : ["○", "关"];
+    GM_registerMenuCommand(`${indicator} 自动关闭「下载应用」弹窗：${status}`, () => {
+      toggleAppPromo();
+      registerAppPromoMenu();
+    }, { id: "cghs-app-promo" });
+  }
   function registerMenus() {
     if (typeof GM_registerMenuCommand !== "function") return;
     registerModeMenus();
+    registerAppPromoMenu();
     GM_registerMenuCommand("重新读取完整会话索引", () => {
       syncConversation();
       if (state.conversation.status !== "loading") state.conversation.retryAt = 0;
@@ -1304,27 +1351,6 @@ ${buttons.join("\n") || "未找到语义标签"}`;
       maintainSidebar();
     });
     GM_registerMenuCommand("查看脚本状态", showDiagnostics);
-  }
-
-  // src/app-promo.js
-  var handled = /* @__PURE__ */ new WeakSet();
-  function findPromo(root) {
-    if (root.matches?.(APP_PROMO.dialog)) return root;
-    return root.querySelector?.(APP_PROMO.dialog) ?? null;
-  }
-  function dismissPromoIn(root) {
-    const dialog = findPromo(root);
-    if (!dialog || handled.has(dialog)) return;
-    const closeButton = dialog.querySelector(APP_PROMO.closeButton);
-    if (!closeButton) return;
-    handled.add(dialog);
-    closeButton.click();
-  }
-  function observeAppPromo() {
-    new MutationObserver((mutations) => {
-      for (const { addedNodes } of mutations) addedNodes.forEach((node) => dismissPromoIn(node));
-    }).observe(document, { childList: true, subtree: true });
-    dismissPromoIn(document);
   }
 
   // src/main.js

@@ -1,5 +1,7 @@
-// Tampermonkey 菜单命令与导航模式切换。
+// Tampermonkey 菜单命令、导航模式切换与「下载应用」弹窗开关。
 import { state } from './state.js';
+import { writeSetting } from './storage.js';
+import { isAppPromoEnabled, toggleAppPromo } from './app-promo.js';
 import { syncConversation } from './conversation.js';
 import { maintainHistory } from './history-loader.js';
 import { maintainSidebar } from './sidebar-controller.js';
@@ -10,7 +12,7 @@ import { showDiagnostics } from './diagnostics.js';
 function setMode(mode) {
     state.mode = mode;
     if (mode === 'off') cancelJump();
-    if (typeof GM_setValue === 'function') GM_setValue('navigationMode', mode);
+    writeSetting('navigationMode', mode);
     registerModeMenus();
     maintainHistory();
     refreshNavigation();
@@ -29,9 +31,19 @@ function registerModeMenus() {
     }
 }
 
+// 切换后用同一个 id 重新注册，刷新菜单标题里的 ✅/○ 与开/关。
+function registerAppPromoMenu() {
+    const [indicator, status] = isAppPromoEnabled() ? ['✅', '开'] : ['○', '关'];
+    GM_registerMenuCommand(`${indicator} 自动关闭「下载应用」弹窗：${status}`, () => {
+        toggleAppPromo();
+        registerAppPromoMenu();
+    }, { id: 'cghs-app-promo' });
+}
+
 export function registerMenus() {
     if (typeof GM_registerMenuCommand !== 'function') return;
     registerModeMenus();
+    registerAppPromoMenu();
     GM_registerMenuCommand('重新读取完整会话索引', () => {
         syncConversation();
         if (state.conversation.status !== 'loading') state.conversation.retryAt = 0;

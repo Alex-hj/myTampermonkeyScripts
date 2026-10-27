@@ -1,7 +1,8 @@
 // 全局运行状态与用户保存的导航模式。
+import { readSetting } from './storage.js';
 
 function readMode() {
-    const value = typeof GM_getValue === 'function' ? GM_getValue('navigationMode', 'auto') : 'auto';
+    const value = readSetting('navigationMode', 'auto');
     return ['auto', 'always', 'off'].includes(value) ? value : 'auto';
 }
 

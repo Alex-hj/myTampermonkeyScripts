@@ -9,7 +9,7 @@ test('重复注入不会重复注册菜单或创建导航', t => {
     f.start();
     f.start();
     assert.equal(f.document.querySelectorAll('#cghs-navigation').length, 1);
-    assert.equal(f.menus.size, 6);
+    assert.equal(f.menus.size, 7);
 });
 
 test('诊断窗口一键复制阶段错误和侧栏状态，关闭后移除窗口', async t => {

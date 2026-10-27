@@ -69,13 +69,19 @@ function fixture(t, options = {}) {
     Object.defineProperty(window, 'innerWidth', { value: options.width || 1400, configurable: true });
     window.matchMedia = query => ({ matches: query.includes('hover') && options.touch !== true });
     const menus = new Map();
+    const menuLabels = new Map();
     const storage = new Map([['navigationMode', options.mode || 'auto']]);
-    window.GM_getValue = (key, fallback) => storage.get(key) || fallback;
+    // 与 Tampermonkey 一致：没保存过才返回默认值，保存过的 false / 0 / '' 要原样返回。
+    window.GM_getValue = (key, fallback) => (storage.has(key) ? storage.get(key) : fallback);
     window.GM_setValue = (key, value) => storage.set(key, value);
-    window.GM_registerMenuCommand = (label, action, options) => menus.set(options?.id || label, action);
+    window.GM_registerMenuCommand = (label, action, options) => {
+        const key = options?.id || label;
+        menus.set(key, action);
+        menuLabels.set(key, label);
+    };
     installGeometry(window);
     const advance = fakeClock(window);
-    return { window, document: window.document, advance, menus, storage,
+    return { window, document: window.document, advance, menus, menuLabels, storage,
         start: () => window.eval(source) };
 }
 

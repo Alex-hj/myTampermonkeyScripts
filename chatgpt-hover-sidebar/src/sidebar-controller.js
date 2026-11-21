@@ -1,4 +1,4 @@
-// 左侧栏启动收起与鼠标悬停展开/移出收起。
+// 左侧栏启动收起与鼠标悬停展开/移出收起；菜单关闭 state.sidebarAuto 后，悬停展开与移出收起都停用。
 import { CONFIG } from './config.js';
 import { state } from './state.js';
 import { cancelTimer } from './utils.js';
@@ -26,7 +26,7 @@ export function maintainSidebar() {
 
 function openFromEdge() {
     state.openTimer = null;
-    if (!desktop() || !state.pointer || state.pointer.x > CONFIG.edgeWidth) return;
+    if (!state.sidebarAuto || !desktop() || !state.pointer || state.pointer.x > CONFIG.edgeWidth) return;
     if (state.startup || interactionProtected() || sidebarState() !== 'closed') return;
     if (clickToggle('open')) state.owned = true;
 }
@@ -34,7 +34,7 @@ function openFromEdge() {
 export function closeFromHover() {
     state.closeTimer = null;
     // 延时期间可能刚进入重命名，执行关闭前必须再次检查。
-    if (!desktop() || pointerInside() || sidebarState() !== 'open' || sidebarCloseProtected()) return;
+    if (!state.sidebarAuto || !desktop() || pointerInside() || sidebarState() !== 'open' || sidebarCloseProtected()) return;
     clickToggle('close');
 }
 
@@ -48,7 +48,7 @@ function pointerInside() {
 }
 
 export function evaluatePointer() {
-    if (!desktop()) return;
+    if (!state.sidebarAuto || !desktop()) return;
     const current = sidebarState();
     const atEdge = state.pointer && state.pointer.x <= CONFIG.edgeWidth;
     if (atEdge && current === 'closed' && !state.startup && !state.openTimer) {

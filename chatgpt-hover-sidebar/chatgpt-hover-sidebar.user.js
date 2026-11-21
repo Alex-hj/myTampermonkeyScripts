@@ -77,8 +77,11 @@
     const value = readSetting("navigationMode", "auto");
     return ["auto", "always", "off"].includes(value) ? value : "auto";
   }
+  var sidebarAuto = readSetting("sidebarAuto", true) !== false;
   var state = {
-    startup: true,
+    // 关闭左侧栏自动功能时没有「启动收起」阶段，所以初值跟随开关。
+    startup: sidebarAuto,
+    sidebarAuto,
     owned: false,
     pending: null,
     cooldown: 0,
@@ -926,13 +929,13 @@
   }
   function openFromEdge() {
     state.openTimer = null;
-    if (!desktop() || !state.pointer || state.pointer.x > CONFIG.edgeWidth) return;
+    if (!state.sidebarAuto || !desktop() || !state.pointer || state.pointer.x > CONFIG.edgeWidth) return;
     if (state.startup || interactionProtected() || sidebarState() !== "closed") return;
     if (clickToggle("open")) state.owned = true;
   }
   function closeFromHover() {
     state.closeTimer = null;
-    if (!desktop() || pointerInside() || sidebarState() !== "open" || sidebarCloseProtected()) return;
+    if (!state.sidebarAuto || !desktop() || pointerInside() || sidebarState() !== "open" || sidebarCloseProtected()) return;
     clickToggle("close");
   }
   function pointerInside() {
@@ -942,7 +945,7 @@
     return state.pointer.x >= rect.left && state.pointer.x <= rect.right + CONFIG.sidebarPadding && state.pointer.y >= rect.top && state.pointer.y <= rect.bottom;
   }
   function evaluatePointer() {
-    if (!desktop()) return;
+    if (!state.sidebarAuto || !desktop()) return;
     const current = sidebarState();
     const atEdge = state.pointer && state.pointer.x <= CONFIG.edgeWidth;
     if (atEdge && current === "closed" && !state.startup && !state.openTimer) {
@@ -1336,10 +1339,23 @@ ${buttons.join("\n") || "未找到语义标签"}`;
       registerAppPromoMenu();
     }, { id: "cghs-app-promo" });
   }
+  function toggleSidebarAuto() {
+    state.sidebarAuto = !state.sidebarAuto;
+    writeSetting("sidebarAuto", state.sidebarAuto);
+    if (!state.sidebarAuto) state.startup = false;
+  }
+  function registerSidebarAutoMenu() {
+    const [indicator, status] = state.sidebarAuto ? ["✅", "开"] : ["○", "关"];
+    GM_registerMenuCommand(`${indicator} 左侧栏悬停展开与自动收起：${status}`, () => {
+      toggleSidebarAuto();
+      registerSidebarAutoMenu();
+    }, { id: "cghs-sidebar-auto" });
+  }
   function registerMenus() {
     if (typeof GM_registerMenuCommand !== "function") return;
     registerModeMenus();
     registerAppPromoMenu();
+    registerSidebarAutoMenu();
     GM_registerMenuCommand("重新读取完整会话索引", () => {
       syncConversation();
       if (state.conversation.status !== "loading") state.conversation.retryAt = 0;

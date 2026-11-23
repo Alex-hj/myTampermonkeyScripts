@@ -7,6 +7,7 @@ import { navigationSuppressed } from './native-navigation.js';
 import { navigationStyles } from './navigation-styles.js';
 import { updateNavigationStatus } from './navigation-status.js';
 import { jumpToEntry } from './jump.js';
+import { traceNavigation } from './jump-trace.js';
 
 function createNavigation() {
     if (state.host?.isConnected) return;
@@ -38,6 +39,7 @@ function centerActiveNavigationEntry() {
     if (!active) return;
     // 只滚动导航自身，不使用 scrollIntoView，避免带动聊天正文。
     list.scrollTop = Math.max(0, active.offsetTop - list.offsetTop - (list.clientHeight - active.offsetHeight) / 2);
+    traceNavigation(() => `居中 list.st=${Math.round(list.scrollTop)} 展开=${state.navigationExpanded}`);
 }
 
 function setNavigationExpanded(expanded) {
@@ -140,6 +142,7 @@ export function refreshNavigation() {
     if (signature !== state.signature) {
         state.root.querySelector('.list').replaceChildren(...entries.map(entryButton));
         state.signature = signature;
+        traceNavigation(() => `重建 条目数=${entries.length}`);
     }
     queueActiveUpdate();
     updateNavigationStatus();

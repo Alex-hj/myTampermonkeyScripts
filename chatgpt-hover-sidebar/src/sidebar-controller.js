@@ -2,6 +2,7 @@
 import { CONFIG } from './config.js';
 import { state } from './state.js';
 import { cancelTimer } from './utils.js';
+import { isOwnWheel } from './follow-mode.js';
 import { desktop, pageVisible, sidebar, sidebarState } from './sidebar-detect.js';
 import { interactionProtected, sidebarCloseProtected } from './sidebar-protection.js';
 import { clickToggle, settleToggle } from './sidebar-toggle.js';
@@ -64,6 +65,7 @@ export function evaluatePointer() {
 
 export function handlePointer(event) {
     if (event.pointerType && event.pointerType !== 'mouse') return;
+    if (isOwnWheel(event)) return;
     state.pointer = { x: event.clientX, y: event.clientY };
     // 每次移动仅更新坐标；DOM 查询限制为每帧一次。
     if (state.pointerFrame) return;

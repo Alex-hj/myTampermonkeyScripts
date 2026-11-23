@@ -19,6 +19,7 @@ export const CONFIG = Object.freeze({
     jumpStableDuration: 400,
     jumpBoundaryDelay: 900,
     jumpEmptyWindowDelay: 900,
+    jumpTraceLimit: 600,
     startupStableDelay: 1000,
     historyRefreshInterval: 60000,
     retryBaseDelay: 30000,

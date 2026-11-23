@@ -3,6 +3,7 @@ import { DIAGNOSTICS_ID } from './config.js';
 import { state } from './state.js';
 import { isVisible } from './utils.js';
 import { deviceCookie } from './request-context.js';
+import { jumpTraceText } from './jump-trace.js';
 import { desktop, sidebarState, toggleButton } from './sidebar-detect.js';
 
 // 版本号只在脚本头 @version 维护一处，运行时由脚本管理器提供。
@@ -34,7 +35,8 @@ function diagnosticText() {
             ?? (state.jump ? Date.now() - state.jump.startedAt : 0)} ms\n`
         + `备用导航：${state.mode}\n完整索引：${context?.status}\n`
         + `${context?.error || ''}\n${(context?.attempts || []).join('\n')}\n`
-        + `侧栏按钮：\n${buttons.join('\n') || '未找到语义标签'}`;
+        + `侧栏按钮：\n${buttons.join('\n') || '未找到语义标签'}`
+        + jumpTraceText(state.lastJump);
 }
 
 function diagnosticDialog(root, text) {

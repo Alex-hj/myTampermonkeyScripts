@@ -3,6 +3,8 @@ import { CONFIG } from './config.js';
 import { isCurrentConversation, state } from './state.js';
 import { collectEntries } from './entries.js';
 import { updateNavigationStatus } from './navigation-status.js';
+import { traceIteration, traceScroll } from './jump-trace.js';
+import { leaveFollowMode } from './follow-mode.js';
 import {
     clampScroll,
     conversationScroller,
@@ -67,6 +69,8 @@ function stepTowardsEntry(job, entries) {
     root.scrollTo({ top: top === root.scrollTop && range.max > range.min ? nudged : top,
         behavior: 'instant' });
     job.scrolls++;
+    traceScroll(job, '搜索', null, () => `方向=${direction} 间隔=${gap} `
+        + `步幅=${job.stepRatio.toFixed(2)} 计划st=${Math.round(top)} 边界=${job.atBoundary}`);
 }
 
 function resolveJumpEntry(job, entries) {
@@ -88,6 +92,8 @@ function confirmJumpTarget(job, target) {
     if (!sameTarget || !aligned) {
         scrollToMessage(target);
         job.scrolls++;
+        traceScroll(job, '校正', target, () => `目标top ${Math.round(top)}→${Math.round(target.getBoundingClientRect().top)} `
+            + `同一节点=${sameTarget} 已对齐=${aligned} 稳定帧=${job.stableFrames}`);
     }
     return false;
 }
@@ -136,6 +142,7 @@ async function locateUnloaded(job) {
             return;
         }
         const target = entry.target;
+        traceIteration(job, entries, entry);
         if (target?.isConnected) {
             if (confirmJumpTarget(job, target)) {
                 state.notice = '';
@@ -160,6 +167,8 @@ export async function jumpToEntry(index) {
     const entry = state.entries[index];
     if (!entry) return;
     cancelJump();
+    // 必须在登记 state.jump 之前派发：滚轮会触发 cancelJump，此时没有进行中的任务。
+    leaveFollowMode();
     // 使用点击时的消息身份重新查找节点，不能信任上一次渲染保留的 DOM 引用。
     const job = { id: entry.id, text: entry.text, originalTarget: entry.target,
         context: state.conversation, cancelled: false, attempts: 0, stableFrames: 0,
@@ -179,7 +188,7 @@ export async function jumpToEntry(index) {
     finally {
         if (state.jump === job) state.jump = null;
         if (state.lastJump === job) state.lastJump = { result: job.result, attempts: job.attempts,
-            scrolls: job.scrolls, elapsed: job.elapsed ?? Date.now() - job.startedAt };
+            scrolls: job.scrolls, elapsed: job.elapsed ?? Date.now() - job.startedAt, trace: job.trace };
         updateNavigationStatus();
     }
 }

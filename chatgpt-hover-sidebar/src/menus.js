@@ -1,7 +1,8 @@
-// Tampermonkey 菜单命令、导航模式切换，以及「下载应用」弹窗、左侧栏自动功能两个开关。
+// Tampermonkey 菜单命令、导航模式切换，以及「下载应用」弹窗、左侧栏自动功能、跳转轨迹三个开关。
 import { state } from './state.js';
 import { writeSetting } from './storage.js';
 import { isAppPromoEnabled, toggleAppPromo } from './app-promo.js';
+import { isJumpTraceEnabled, toggleJumpTrace } from './jump-trace.js';
 import { syncConversation } from './conversation.js';
 import { maintainHistory } from './history-loader.js';
 import { maintainSidebar } from './sidebar-controller.js';
@@ -55,11 +56,21 @@ function registerSidebarAutoMenu() {
     }, { id: 'cghs-sidebar-auto' });
 }
 
+// 调试开关：开启后每次点击导航的定位过程会记录到「查看脚本状态」里，用于排查定位时的页面跳动。
+function registerJumpTraceMenu() {
+    const [indicator, status] = isJumpTraceEnabled() ? ['✅', '开'] : ['○', '关'];
+    GM_registerMenuCommand(`${indicator} 记录跳转轨迹（调试）：${status}`, () => {
+        toggleJumpTrace();
+        registerJumpTraceMenu();
+    }, { id: 'cghs-jump-trace' });
+}
+
 export function registerMenus() {
     if (typeof GM_registerMenuCommand !== 'function') return;
     registerModeMenus();
     registerAppPromoMenu();
     registerSidebarAutoMenu();
+    registerJumpTraceMenu();
     GM_registerMenuCommand('重新读取完整会话索引', () => {
         syncConversation();
         if (state.conversation.status !== 'loading') state.conversation.retryAt = 0;

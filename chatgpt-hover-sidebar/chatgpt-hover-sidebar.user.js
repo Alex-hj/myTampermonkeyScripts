@@ -42,6 +42,7 @@
     jumpStableDuration: 400,
     jumpBoundaryDelay: 900,
     jumpEmptyWindowDelay: 900,
+    jumpTraceLimit: 600,
     startupStableDelay: 1e3,
     historyRefreshInterval: 6e4,
     retryBaseDelay: 3e4,
@@ -304,6 +305,84 @@
     return atEnd && rect.top >= bounds.top && rect.top < bounds.bottom - 24;
   }
 
+  // src/jump-trace.js
+  var SETTING_KEY = "traceJump";
+  var enabled = readSetting(SETTING_KEY, false) === true;
+  function isJumpTraceEnabled() {
+    return enabled;
+  }
+  function toggleJumpTrace() {
+    enabled = !enabled;
+    writeSetting(SETTING_KEY, enabled);
+  }
+  function addTrace(job, text) {
+    const lines = job.trace ??= [];
+    if (lines.length > CONFIG.jumpTraceLimit) return;
+    const elapsed = String(Date.now() - job.startedAt).padStart(5);
+    lines.push(lines.length === CONFIG.jumpTraceLimit ? "…已达记录上限，后续省略" : `${elapsed}ms #${job.attempts} ${text}`);
+  }
+  function scrollerName(root) {
+    const testId = root.getAttribute("data-testid");
+    const className = String(root.className).trim().replace(/\s+/g, ".").slice(0, 40);
+    return `${root.tagName.toLowerCase()}${root.id ? `#${root.id}` : ""}${testId ? `[${testId}]` : ""}.${className}`;
+  }
+  function scrollState(root) {
+    return `st=${Math.round(root.scrollTop)} sh=${root.scrollHeight} ch=${root.clientHeight}`;
+  }
+  function recordedTops(job) {
+    return job.traceTops ??= /* @__PURE__ */ new WeakMap();
+  }
+  function observeRoot(job, root) {
+    const tops = recordedTops(job);
+    const top = Math.round(root.scrollTop);
+    const moved = tops.has(root) ? top - tops.get(root) : "-";
+    tops.set(root, top);
+    return `${scrollerName(root)} ${scrollState(root)} 外部位移=${moved}`;
+  }
+  function mountedSummary(job, entries) {
+    const wanted = entries.findIndex((entry) => entry.id === job.id);
+    const mounted = entries.flatMap((entry, index) => entry.target?.isConnected ? [index] : []);
+    const range = mounted.length ? `${mounted[0]}..${mounted.at(-1)}` : "无";
+    return `目标序号=${wanted}/${entries.length} 已挂载=${range}(${mounted.length}个)`;
+  }
+  function targetSummary(job, target, searchRoot) {
+    if (!target?.isConnected) return "目标=未挂载";
+    const own = conversationScroller(target);
+    const container = own === searchRoot ? "与搜索容器相同" : `与搜索容器不同 ${observeRoot(job, own)}`;
+    return `目标top=${Math.round(target.getBoundingClientRect().top)} 校正容器=${container}`;
+  }
+  function traceIteration(job, entries, entry) {
+    if (!enabled) return;
+    const root = conversationScroller();
+    addTrace(job, `检查 搜索容器=${observeRoot(job, root)} ${mountedSummary(job, entries)} ` + targetSummary(job, entry.target, root));
+  }
+  function traceScroll(job, label, target, detail) {
+    if (!enabled) return;
+    const root = conversationScroller(target);
+    recordedTops(job).set(root, Math.round(root.scrollTop));
+    addTrace(job, `${label} ${detail()} → ${scrollState(root)}`);
+  }
+  function traceNavigation(describe) {
+    if (enabled && state.jump) addTrace(state.jump, `目录 ${describe()}`);
+  }
+  function jumpTraceText(job) {
+    const lines = job?.trace;
+    return lines?.length ? `
+定位轨迹（调试，最近一次）：
+${lines.join("\n")}` : "";
+  }
+
+  // src/follow-mode.js
+  var ownWheelEvents = /* @__PURE__ */ new WeakSet();
+  function isOwnWheel(event) {
+    return ownWheelEvents.has(event);
+  }
+  function leaveFollowMode() {
+    const event = new WheelEvent("wheel", { deltaY: -1, bubbles: true, cancelable: true, composed: true });
+    ownWheelEvents.add(event);
+    conversationScroller().dispatchEvent(event);
+  }
+
   // src/jump.js
   function cancelJump() {
     if (!state.jump) return;
@@ -354,6 +433,7 @@
       behavior: "instant"
     });
     job.scrolls++;
+    traceScroll(job, "搜索", null, () => `方向=${direction} 间隔=${gap} 步幅=${job.stepRatio.toFixed(2)} 计划st=${Math.round(top)} 边界=${job.atBoundary}`);
   }
   function resolveJumpEntry(job, entries) {
     if (job.id) return entries.find((entry) => entry.id === job.id);
@@ -373,6 +453,7 @@
     if (!sameTarget || !aligned) {
       scrollToMessage(target);
       job.scrolls++;
+      traceScroll(job, "校正", target, () => `目标top ${Math.round(top)}→${Math.round(target.getBoundingClientRect().top)} 同一节点=${sameTarget} 已对齐=${aligned} 稳定帧=${job.stableFrames}`);
     }
     return false;
   }
@@ -416,6 +497,7 @@
         return;
       }
       const target = entry.target;
+      traceIteration(job, entries, entry);
       if (target?.isConnected) {
         if (confirmJumpTarget(job, target)) {
           state.notice = "";
@@ -439,6 +521,7 @@
     const entry = state.entries[index];
     if (!entry) return;
     cancelJump();
+    leaveFollowMode();
     const job = {
       id: entry.id,
       text: entry.text,
@@ -470,7 +553,8 @@
         result: job.result,
         attempts: job.attempts,
         scrolls: job.scrolls,
-        elapsed: job.elapsed ?? Date.now() - job.startedAt
+        elapsed: job.elapsed ?? Date.now() - job.startedAt,
+        trace: job.trace
       };
       updateNavigationStatus();
     }
@@ -960,6 +1044,7 @@
   }
   function handlePointer(event) {
     if (event.pointerType && event.pointerType !== "mouse") return;
+    if (isOwnWheel(event)) return;
     state.pointer = { x: event.clientX, y: event.clientY };
     if (state.pointerFrame) return;
     state.pointerFrame = requestAnimationFrame(() => {
@@ -1084,6 +1169,7 @@
     const active = list?.querySelector('[aria-current="true"]');
     if (!active) return;
     list.scrollTop = Math.max(0, active.offsetTop - list.offsetTop - (list.clientHeight - active.offsetHeight) / 2);
+    traceNavigation(() => `居中 list.st=${Math.round(list.scrollTop)} 展开=${state.navigationExpanded}`);
   }
   function setNavigationExpanded(expanded) {
     cancelTimer("navigationCloseTimer");
@@ -1177,28 +1263,29 @@
     if (signature !== state.signature) {
       state.root.querySelector(".list").replaceChildren(...entries.map(entryButton));
       state.signature = signature;
+      traceNavigation(() => `重建 条目数=${entries.length}`);
     }
     queueActiveUpdate();
     updateNavigationStatus();
   }
 
   // src/app-promo.js
-  var SETTING_KEY = "closeAppPromo";
-  var enabled = readSetting(SETTING_KEY, true) !== false;
+  var SETTING_KEY2 = "closeAppPromo";
+  var enabled2 = readSetting(SETTING_KEY2, true) !== false;
   var handled = /* @__PURE__ */ new WeakSet();
   function isAppPromoEnabled() {
-    return enabled;
+    return enabled2;
   }
   function toggleAppPromo() {
-    enabled = !enabled;
-    writeSetting(SETTING_KEY, enabled);
+    enabled2 = !enabled2;
+    writeSetting(SETTING_KEY2, enabled2);
   }
   function findPromo(root) {
     if (root.matches?.(APP_PROMO.dialog)) return root;
     return root.querySelector?.(APP_PROMO.dialog) ?? null;
   }
   function dismissPromoIn(root) {
-    if (!enabled) return;
+    if (!enabled2) return;
     const dialog = findPromo(root);
     if (!dialog || handled.has(dialog)) return;
     const closeButton = dialog.querySelector(APP_PROMO.closeButton);
@@ -1245,7 +1332,7 @@
 ${context?.error || ""}
 ${(context?.attempts || []).join("\n")}
 侧栏按钮：
-${buttons.join("\n") || "未找到语义标签"}`;
+${buttons.join("\n") || "未找到语义标签"}` + jumpTraceText(state.lastJump);
   }
   function diagnosticDialog(root, text) {
     const style = document.createElement("style");
@@ -1351,11 +1438,19 @@ ${buttons.join("\n") || "未找到语义标签"}`;
       registerSidebarAutoMenu();
     }, { id: "cghs-sidebar-auto" });
   }
+  function registerJumpTraceMenu() {
+    const [indicator, status] = isJumpTraceEnabled() ? ["✅", "开"] : ["○", "关"];
+    GM_registerMenuCommand(`${indicator} 记录跳转轨迹（调试）：${status}`, () => {
+      toggleJumpTrace();
+      registerJumpTraceMenu();
+    }, { id: "cghs-jump-trace" });
+  }
   function registerMenus() {
     if (typeof GM_registerMenuCommand !== "function") return;
     registerModeMenus();
     registerAppPromoMenu();
     registerSidebarAutoMenu();
+    registerJumpTraceMenu();
     GM_registerMenuCommand("重新读取完整会话索引", () => {
       syncConversation();
       if (state.conversation.status !== "loading") state.conversation.retryAt = 0;
